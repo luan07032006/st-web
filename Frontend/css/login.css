@@ -1,0 +1,22 @@
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 30px 22px; font-family: 'Segoe UI', Arial, sans-serif; color: #44332e; background: radial-gradient(ellipse at 15% 20%, #fce8ed99, transparent 48%), radial-gradient(ellipse at 85% 75%, #cdeee899, transparent 45%), #f5fbfa; }
+body::before { content: ''; position: fixed; inset: 12px; border: 1px solid #e9d9da; border-radius: 20px; pointer-events: none; }
+.doodles { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
+.doodles span { position: absolute; font-family: Georgia, serif; font-size: clamp(25px, 4vw, 48px); opacity: .45; color: #659e96; transform: rotate(-15deg); }
+.doodles span:nth-child(1) { left: 9%; top: 13%; }.doodles span:nth-child(2) { left: 24%; top: 5%; color: #d9b655; }.doodles span:nth-child(3) { right: 10%; top: 20%; }.doodles span:nth-child(4) { right: 17%; top: 43%; }.doodles span:nth-child(5) { left: 12%; top: 42%; }.doodles span:nth-child(6) { left: 5%; top: 65%; }.doodles span:nth-child(7) { right: 5%; top: 68%; }.doodles span:nth-child(8) { right: 25%; bottom: 7%; color: #d9b655; }.doodles span:nth-child(9) { left: 19%; bottom: 12%; }.doodles span:nth-child(10) { left: 36%; bottom: 3%; font-size: 22px; opacity: .2; }.doodles span:nth-child(11) { right: 7%; top: 6%; color: #d9b655; }.doodles span:nth-child(12) { right: 15%; bottom: 10%; }
+.login-shell { width: min(100%, 390px); z-index: 1; text-align: center; }
+.teacher { width: 320px; max-width: 96%; display: block; margin: 0 auto -4px; position: relative; z-index: 2; }
+.login-card { background: #ffffffed; border: 1px solid #fff; border-radius: 23px; padding: 30px 28px 23px; box-shadow: 0 14px 40px #688b8020, 0 3px 9px #76544610; }
+.eyebrow { font-size: 9px; letter-spacing: 1.8px; color: #8caaa0; font-weight: 700; }
+h1 { font-size: 23px; line-height: 1.45; margin: 12px -8px 8px; font-weight: 750; }
+.intro { font-size: 13px; color: #99867e; margin: 0 0 25px; }
+.input-wrap { display: flex; align-items: center; border: 1.5px solid #add9cd; border-radius: 19px; padding: 7px 10px; gap: 10px; text-align: left; margin-bottom: 13px; background: #fbefed; transition: box-shadow .2s; }
+.password-wrap { background: #edf1fc; border-color: #c4d3e7; }
+.input-wrap:focus-within { box-shadow: 0 0 0 3px #afdace55; }
+.field-icon { flex: 0 0 39px; height: 39px; border-radius: 50%; background: #f4ced0; display: grid; place-items: center; color: #493b39; }
+.field-icon svg { width: 26px; height: 26px; }
+.password-wrap .field-icon { background: #cfdef3; color: #34414c; }
+.field { flex: 1; min-width: 0; }.field label { display: block; font-size: 11px; color: #7d756f; margin-bottom: 3px; }.field input { border: 0; outline: none; background: transparent; width: 100%; font: inherit; font-size: 14px; color: #44332e; padding: 0; }.field input::placeholder { color: #aaa19e; font-size: 12px; }
+button { cursor: pointer; font: inherit; }.password-toggle { border: 0; background: none; padding: 8px; color: #7c8392; border-radius: 8px; }.login-button { width: 100%; margin-top: 10px; border: none; border-radius: 20px; padding: 14px 18px; font-size: 14px; font-weight: 700; background: #afded0; color: #354e46; display: flex; justify-content: center; gap: 16px; transition: background .2s, transform .2s; }.login-button:hover { background: #97d0c0; transform: translateY(-1px); }button:focus-visible { outline: 3px solid #699f91; outline-offset: 3px; }
+.error { font-size: 12px; line-height: 1.5; color: #b34753; margin: 4px 0; text-align: left; }.footer-note { font-size: 10px; color: #938a80; margin: 20px -12px 0; }.page-note { font-size: 11px; color: #8aa49b; margin: 20px 0 0; }
+@media (max-width: 480px) { body { padding: 25px 28px; }.login-card { padding: 25px 22px 22px; }h1 { font-size: 20px; }.teacher { width: 245px; }.doodles span { opacity: .3; }.doodles span:nth-child(5) { left: 1%; }.doodles span:nth-child(4) { right: 1%; } }
