@@ -86,7 +86,8 @@ public final class Main {
     public static void main(String[] args) throws IOException {
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
         HttpServer server = HttpServer.create(
-            new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
+            new InetSocketAddress(InetAddress.getByName(
+                    System.getenv().getOrDefault("HOST", "127.0.0.1")), port), 0);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.createContext("/api/lesson", Main::handleLesson);
         server.createContext("/api/ai/recognize", exchange -> handleAI(exchange, false));

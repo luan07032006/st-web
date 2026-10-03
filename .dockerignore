@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+.codex
+.agents
+.aws
+Backend/target
+Backend/data
+.env
+.env.*
+*-check.html
+*-check-output.txt
+chrome-*-check
