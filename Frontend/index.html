@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bảng Trắng • Không gian dạy học</title>
+    <meta name="description" content="Không gian bảng trắng tương tác cho giảng dạy: vẽ, viết, hình học và đồ thị.">
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23245bea'/%3E%3Cpath d='M9 8h9q8 0 4 8 5 8-4 8H9z' fill='white'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body class="sidebar-collapsed">
+    <header><a class="brand" href="./"><span class="brand-mark">B<span>·</span></span><strong>Bảng
+                Trắng</strong></a><span class="divider"></span>
+        <div class="lesson"><input id="lessonName" aria-label="Tên bài giảng" value="Bài giảng chưa đặt tên"><small
+                id="saveStatus">Đang kết nối máy chủ…</small></div>
+        <div class="header-actions"><button id="toggleSidebar" aria-controls="sidebar" aria-expanded="false">Công cụ / AI</button><button id="exportBtn">↥
+                <span>Xuất ảnh</span></button><button class="primary" id="saveBtn">Lưu PDF</button></div>
+    </header>
+    <nav class="subnav">
+        <div><span class="badge">KHÔNG GIAN DẠY HỌC</span><span class="subtle">Mỗi ý tưởng bắt đầu từ một nét vẽ.</span>
+        </div><button id="focusBtn">⛶ <span>Toàn màn hình</span></button>
+    </nav>
+    <main>
+        <section class="workspace" id="workspace" aria-label="Bảng trắng"><canvas id="board"
+                aria-label="Bảng vẽ tương tác"></canvas>
+            <div class="board-scrollbar" id="boardScroll" role="scrollbar" tabindex="0"
+                aria-label="Cuộn bảng theo chiều dọc" aria-controls="board" aria-orientation="vertical"
+                aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                <div class="board-scroll-track"><div class="board-scroll-thumb" id="boardScrollThumb"></div></div>
+            </div>
+            <div class="board-label"><span class="tiny-square"></span> BẢNG CHÍNH <span id="objectCount">0 đối
+                    tượng</span></div>
+            <div class="welcome" id="welcome"><span class="welcome-icon">✎</span>
+                <h1>Ý tưởng của bạn,<br>không giới hạn.</h1>
+                <p>Chọn một công cụ và bắt đầu bài giảng của bạn.</p>
+                <div><kbd>B</kbd> Bút vẽ <span>·</span> <kbd>Space</kbd> Di chuyển bảng</div><button id="exampleBtn">Thử
+                    bài giảng mẫu <span>↗</span></button>
+            </div>
+            <div class="toolbar" id="toolbar">
+                <div class="tool-handle" id="toolHandle" title="Kéo để di chuyển thanh công cụ">⠿</div>
+                <div id="toolButtons"></div>
+                <div class="tool-separator"></div><button id="imageBtn" title="Chèn ảnh hoặc tài liệu"
+                    aria-label="Chèn ảnh hoặc tài liệu">▧</button><button id="collapseTools" title="Thu gọn thanh công cụ"
+                    aria-label="Thu gọn thanh công cụ">‹</button>
+            </div>
+            <div class="eraser-options" id="eraserOptions" role="group" aria-label="Chế độ tẩy" hidden>
+                <button type="button" data-eraser-mode="stroke" aria-pressed="true">Tẩy nét</button>
+                <button type="button" data-eraser-mode="object" aria-pressed="false">Tẩy đối tượng</button>
+            </div>
+            <div class="pen-options"><span class="option-title">MÀU NÉT</span>
+                <div id="colors"></div><input id="customColor" type="color" value="#245bea"
+                    aria-label="Màu tùy chọn"><span class="vertical-line"></span><input id="strokeWidth" type="range"
+                    min="1" max="20" value="3" aria-label="Độ dày nét"><span id="widthValue">3 px</span>
+            </div>
+            <div class="board-bottom">
+                <div class="history"><button id="undoBtn" aria-label="Hoàn tác"
+                        title="Hoàn tác (Ctrl Z)">↶</button><button id="redoBtn" aria-label="Làm lại"
+                        title="Làm lại (Ctrl Shift Z)">↷</button><span></span><button id="clearBtn"
+                        aria-label="Xóa bảng" title="Xóa toàn bộ bảng">♲</button></div>
+                <div class="zoom"><button id="resetView"
+                        title="Tỷ lệ cố định 100% · Nhấn để về đầu bảng">100%</button><span></span><select id="themeMode" aria-label="Chế độ giao diện">
+                        <option value="light">Giao diện sáng</option>
+                        <option value="dark">Giao diện tối</option>
+                    </select><select id="background" aria-label="Kiểu nền">
+                        <option value="dots">Nền chấm</option>
+                        <option value="grid">Ô vuông</option>
+                        <option value="lined">Giấy kẻ ngang</option>
+                        <option value="plain">Nền trắng</option>
+                    </select></div>
+            </div>
+            <div class="selection-note" id="selectionNote" hidden>Đã chọn vùng trên bảng.
+            </div>
+        </section>
+        <aside id="sidebar">
+            <div class="panel-tabs"><button class="active" data-tab="math">∿ Toán học</button><button data-tab="ai">✧
+                    Trợ lý AI</button></div>
+            <div class="panel-content" id="mathPanel">
+                <div class="section-heading">
+                    <h2>Công cụ toán học</h2><span class="mini-tag">MATH LAB</span>
+                </div>
+                <p class="intro">Biến những khái niệm thành hình ảnh.</p>
+                <div class="feature-card">
+                    <div class="feature-icon">ƒ<span>x</span></div>
+                    <h3>Khám phá đồ thị</h3>
+                    <p>Nhập hàm số hoặc bất phương trình để biểu diễn miền nghiệm trên bảng.</p>
+                    <label for="graphType">Loại đồ thị</label>
+                    <div class="function-field function-select-wrap">
+                        <select id="graphType" aria-label="Loại đồ thị">
+                            <option value="function">Hàm số y = f(x)</option>
+                            <option value="inequality">Bất phương trình</option>
+                            <option value="inequalitySystem">Hệ bất phương trình</option>
+                            <option value="variation">Bảng biến thiên</option>
+                            <option value="oxy">Hệ trục Oxy (2D)</option>
+                            <option value="oxyz">Hệ trục Oxyz (3D)</option>
+                        </select>
+                    </div>
+                    <label for="functionInput" id="graphInputLabel">Hàm số</label>
+                    <div class="function-field function-input-wrap"><span id="graphPrefix">y =</span><input
+                            id="functionInput" value="x^2 - 3*x + 2" spellcheck="false"
+                            aria-label="Biểu thức hàm số"></div>
+                    <div class="function-field inequality-input-wrap" hidden><span>⇢</span><input id="inequalityInput"
+                            value="y >= x^2 - 3*x + 2" spellcheck="false"
+                            aria-label="Biểu thức bất phương trình"></div>
+                    <div id="inequalitySystemWrap" hidden><textarea id="inequalitySystemInput" rows="4" aria-label="Hệ bất phương trình, mỗi dòng một điều kiện" spellcheck="false">x >= 0
+y >= 0
+x + y <= 4</textarea></div>
+                    <div class="presets" id="graphPresets"><button data-formula="x^2 - 3*x + 2">Bậc hai</button><button
+                            data-formula="sin(x)">sin(x)</button><button data-formula="2*x + 1">Bậc nhất</button></div>
+                    <div class="presets inequality-presets" id="inequalityPresets" hidden>
+                        <button data-inequality="y >= x^2 - 3*x + 2">y ≥ x² − 3x + 2</button>
+                        <button data-inequality="x + y <= 4">x + y ≤ 4</button>
+                        <button data-inequality="x^2 + y^2 <= 16">x² + y² ≤ 16</button>
+                    </div>
+                    <button class="primary wide" id="graphBtn">+ Chèn đồ thị</button>
+                    <p class="field-note" id="graphHint">Hỗ trợ x, y, + − * / ^, sin, cos, tan, sqrt, abs, và các dấu ≤ ≥.</p>
+                </div>
+                <div class="section-heading geometry-heading">
+                    <h3>Hình học</h3><span>VẼ CHÍNH XÁC</span>
+                </div>
+                <div class="geometry-grid">
+                    <button data-tool="line"><b>╱</b>Đường thẳng</button>
+                    <button data-tool="circle"><b>◯</b>Đường tròn</button>
+                    <button data-tool="rectangle"><b>▱</b>Hình chữ nhật</button>
+                    <button data-tool="square"><b>▢</b>Hình vuông</button>
+                    <button data-tool="rightTriangle"><b>⊿</b>Tam giác vuông</button>
+                    <button data-tool="isoscelesTriangle"><b>△</b>Tam giác cân</button>
+                    <button data-tool="equilateralTriangle"><b>△</b>Tam giác đều</button>
+                    <button data-tool="trapezoid"><b aria-hidden="true"></b>Hình thang</button>
+                    <button data-tool="triangle"><b>△</b>Tam giác</button>
+                    <button data-tool="cone"><b>◢</b>Hình nón</button>
+                    <button data-tool="tetrahedron"><b>◈</b>Tứ diện đều</button>
+                    <button data-tool="quadrilateralPyramid"><b>♢</b>Chóp đáy tứ giác</button>
+                    <button data-tool="cube"><b>⬛</b>Hình lập phương</button>
+                    <button data-tool="cuboid"><b>▣</b>Hộp chữ nhật</button>
+                    <button data-tool="cylinder"><b>◫</b>Hình trụ</button>
+                    <button data-tool="ruler"><b>╱╱</b>Thước thẳng</button>
+                    <button data-tool="protractor"><b>◠</b>Thước đo góc</button>
+                </div>
+                <button class="formula-entry" id="formulaBtn"><span>∑</span>
+                    <div><strong>Chèn công thức</strong><small>Soạn ký hiệu toán học</small></div><span>+</span>
+                </button>
+            </div>
+            <div class="panel-content" id="aiPanel" hidden>
+                <section class="ai-chat" aria-label="Chat với AI">
+                    <button type="button" id="aiRegionBtn" class="primary wide">✧ Khoanh vùng bài toán để AI giải</button>
+                    <p id="aiRegionNote" hidden>Đang hỏi về vùng đã khoanh. <button type="button" id="clearAIRegion">Dùng toàn bảng</button></p>
+                    <div id="aiChatMessages" class="ai-chat-messages" role="log" aria-live="polite">
+                    </div>
+                    <form id="aiChatForm">
+                        <textarea id="aiChatInput" aria-label="Tin nhắn cho AI" rows="3" maxlength="4000" placeholder="Nhập câu hỏi của bạn…" required></textarea>
+                        <div class="ai-chat-controls"><small>Enter để gửi · Shift + Enter xuống dòng</small><button type="submit" id="sendChatBtn">Gửi ↑</button></div>
+                    </form>
+                    <p id="aiChatStatus" role="status"></p>
+                </section>
+            </div>
+        </aside>
+    </main>
+    <footer><span id="toolStatus">Bút vẽ · Kéo trên bảng để viết</span><span>Không gian vô tận, cảm hứng không giới hạn
+            <span class="footer-spark">✧</span></span></footer>
+    <div id="toast" role="status"></div><input type="file" id="imageInput"
+        accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.doc,.docx,.ppt,.pptx" hidden><input type="file" id="importInput"
+        accept="application/json,.json" hidden>
+    <dialog id="textDialog">
+        <form method="dialog">
+            <div class="dialog-head">
+                <h2 id="textTitle">Chèn văn bản</h2><button value="cancel" aria-label="Đóng">×</button>
+            </div>
+            <p id="textHelp">Nhập nội dung, sau đó nhấn Chèn.</p><textarea id="textValue" rows="4"
+                placeholder="Nội dung bài giảng..."></textarea>
+            <div id="symbols" hidden></div>
+            <div class="text-options">
+                <label for="textSize">Cỡ chữ (px)<input id="textSize" type="number" min="8" max="200" step="1" value="24" required></label>
+                <label for="textColor">Màu chữ<input id="textColor" type="color" value="#245bea"></label>
+            </div>
+            <p>Sau khi chèn, kéo chữ để di chuyển; kéo nút ở góc để đổi cỡ chữ. Nhấp đúp vào chữ để sửa.</p>
+            <div class="dialog-actions"><button value="cancel">Hủy</button><button id="insertText" class="primary"
+                    value="default">Chèn lên bảng</button></div>
+        </form>
+    </dialog>
+    <script src="./js/app.js"></script>
+    <script src="./js/ai-chat.js"></script>
+</body>
+
+</html>

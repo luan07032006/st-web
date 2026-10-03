@@ -1,0 +1,42 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Backend: test",
+			"type": "shell",
+			"command": "mvn",
+			"args": [
+				"-f",
+				"Backend/pom.xml",
+				"test"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Backend: run",
+			"type": "shell",
+			"command": "mvn",
+			"args": [
+				"-f",
+				"Backend/pom.xml",
+				"compile",
+				"exec:java"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Backend: verify AI routes",
+			"type": "shell",
+			"command": "mvn",
+			"args": [
+				"-f",
+				"Backend/pom.xml",
+				"test"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
