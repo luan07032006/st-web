@@ -19,6 +19,10 @@ form.addEventListener("submit", (event) => {
   if (username.value === "QuynhHuong" && password.value === "255205") {
     try {
       sessionStorage.setItem("qh-authenticated", "true");
+      sessionStorage.setItem("qh-board-session", crypto.randomUUID());
+      sessionStorage.removeItem("qh-board-started");
+      sessionStorage.removeItem("bangtrang-session-v1");
+      try { localStorage.removeItem("bangtrang-v1"); } catch { /* Legacy cache is no longer used. */ }
       window.location.replace("./index.html");
     } catch (_) {
       error.textContent = "Vui lòng cho phép lưu trữ trong trình duyệt để đăng nhập.";

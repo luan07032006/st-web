@@ -447,6 +447,22 @@ public final class Main {
             }
 
             String type = object.path("type").asText();
+            for (String key : new String[]{"clipRegions", "cutouts"}) {
+                JsonNode regions = object.path(key);
+                if (regions.isMissingNode()) continue;
+                if (!regions.isArray() || regions.size() > 1000) {
+                    throw new IllegalArgumentException("Vùng cắt không hợp lệ.");
+                }
+                for (JsonNode region : regions) {
+                    if (!region.isArray() || region.size() < 3 || region.size() > 100_000) {
+                        throw new IllegalArgumentException("Vùng cắt không hợp lệ.");
+                    }
+                    region.forEach(Main::validateCoordinates);
+                }
+            }
+            if (object.has("freePosition") && !object.path("freePosition").isBoolean()) {
+                throw new IllegalArgumentException("Vị trí vùng cắt không hợp lệ.");
+            }
             if (("pen".equals(type) || "highlight".equals(type))
                     && (!points.isArray() || points.isEmpty())) {
                 throw new IllegalArgumentException("Nét vẽ trống.");
@@ -511,7 +527,8 @@ public final class Main {
             String contentType = switch (extension(file)) {
                 case "html" -> "text/html; charset=utf-8";
                 case "css" -> "text/css; charset=utf-8";
-                case "js" -> "text/javascript; charset=utf-8";
+                case "js", "mjs" -> "text/javascript; charset=utf-8";
+                case "wasm" -> "application/wasm";
                 case "svg" -> "image/svg+xml";
                 default -> "application/octet-stream";
             };

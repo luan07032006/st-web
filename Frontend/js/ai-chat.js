@@ -25,7 +25,7 @@
     image.width = Math.max(1, Math.ceil(captureWidth * scale));
     image.height = Math.max(1, Math.ceil(captureHeight * scale));
     const context = image.getContext("2d");
-    context.fillStyle = document.body.dataset.theme === "dark" ? "#0d1320" : "#ffffff";
+    context.fillStyle = crop ? "#ffffff" : paperSurround;
     context.fillRect(0, 0, image.width, image.height);
     context.scale(scale, scale);
     if (crop) {
@@ -34,6 +34,20 @@
       context.translate(view.x, view.y);
       context.scale(view.z, view.z);
     }
+    let pages = visiblePages();
+    if (crop) {
+      pages = pdfDocumentPages();
+      if (!pages.length) {
+        const first = Math.max(0, Math.floor((crop.y - paper.top) / (paper.h + paper.gap)));
+        const last = Math.min(paperPageCount - 1,
+          Math.floor((crop.y + crop.h - paper.top) / (paper.h + paper.gap)));
+        for (let index = first; index <= last; index++) pages.push(paperPage(index));
+      }
+    }
+    pages.forEach(page => paintPaper(context, page));
+    context.beginPath();
+    pages.forEach(page => context.rect(page.x, page.y, page.w, page.h));
+    context.clip();
     objects.forEach((object) => paintObject(context, object));
     return image.toDataURL("image/png");
   }
@@ -147,13 +161,15 @@
     chooseTool("aiRegion");
     toast("Kéo khoanh trọn đề bài trên bảng, rồi thả để AI giải.");
   };
-  document.getElementById("clearAIRegion").onclick = () => {
+  function clearRegion() {
     region = null;
     document.getElementById("aiRegionNote").hidden = true;
     selection = null;
     draw();
-  };
+  }
+  document.getElementById("clearAIRegion").onclick = clearRegion;
   window.boardAI = {
+    clearRegion,
     get busy() { return busy; },
     solveRegion(area) {
       if (busy) { toast("AI đang trả lời. Hãy đợi rồi khoanh lại."); return; }

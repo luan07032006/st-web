@@ -64,3 +64,52 @@ Compiling files alone does not update a running Java process.
 The server stores one shared lesson in `Backend/data/lesson.json`, accepts JSON
 documents up to 32 MB, and binds to loopback only. This is local persistence,
 not multi-user or cloud storage.
+
+The insert image/document button opens PDFs in a document view using
+the locally bundled PDF.js library. Pen, highlight, undo, lesson saving, and
+the existing PDF export work with these pages. Erasing preserves PDF page
+backgrounds. Pages are arranged vertically on a soft gray background; scroll to
+reach subsequent pages and zoom with the controls below. Opening a PDF replaces the current
+board contents; undo restores the preceding board. Import accepts PDFs
+up to 50 MB and 50 pages, with a 24 MB rendered lesson limit. Password-protected
+PDFs must be unlocked first. Imported pages are raster images, so PDF text
+selection and editing the original PDF are not supported.
+
+
+The drawing workspace uses portrait A4 sheets (210 × 297 mm), initially cream
+with a full-sheet square grid, on a soft gray background. All four edges are writable.
+Open **Giấy & trang** to choose blank, dotted, narrow/wide ruled, squared, or
+ruled paper with a decorative margin. Select a paper color or use the custom
+color picker, then **Áp dụng** to update all A4 sheets. The **Các trang** tab
+shows thumbnails for navigation and adding pages; imported PDF pages keep their
+original appearance. Use **Thêm trang** or scroll toward the bottom to keep extending the
+document. Page count, paper appearance, and view are saved within the login session;
+undo/redo also restores page additions and paper settings. Zoom with **+ / −** (5% steps),
+**Ctrl/Cmd + wheel**, or a gentle two-finger pinch (10–400%). Drag with the hand tool
+or Space to pan; Shift + wheel scrolls horizontally. Click the percentage to fit the
+sheet width and return to the first page. Only visible sheets are painted on the viewport
+canvas. Opening an existing lesson without A4 metadata fits its contents into
+these pages while retaining all objects.
+
+**Lưu PDF** exports one A4 PDF page per sheet containing content, preserves
+intermediate blank sheets, and omits trailing empty sheets. Imported PDF pages
+retain their page boundaries and are fitted proportionally onto A4 when exported.
+**Xuất ảnh** downloads the complete current sheet as PNG, including offscreen
+content. Exports include the selected paper pattern and color but omit
+selection outlines, toolbars, and the gray space around the paper.
+
+
+Every successful login starts a new blank A4 board, with no drawings or uploaded
+files from the previous login. Autosave and reload recovery apply only to the
+current login session: a sessionStorage cache and a matching session ID on the
+server copy prevent old lessons from being restored after logging in again.
+The legacy localStorage lesson cache is no longer read. Download a PDF to keep
+work across logins.
+
+The left toolbar actions are **Xóa nét viết** (all pen/highlight strokes on all
+pages), **Gỡ ảnh / file** (all uploaded images and document pages, retaining other
+content), and **Xóa tất cả** (all content and pages, returning to one blank A4
+sheet). These actions support undo. Repeated scratch gestures remove only pen
+and highlight strokes; they never remove images, document pages, typed text or
+shapes. Both eraser modes also preserve uploaded assets. Use the explicit removal
+buttons to remove files. Clearing the board or files cancels pending insertions.

@@ -7,10 +7,12 @@
 const $ = (id) => document.getElementById(id);
 const canvas = $("board");
 const ctx = canvas.getContext("2d");
+const paperSurround = getComputedStyle(document.documentElement).getPropertyValue("--paper-surround").trim();
 
 const tools = [
   ["pen", "✎", "Bút vẽ", "B"],
-  ["select", "↖", "Chọn / di chuyển đối tượng", "V"],
+  ["select", "↖", "Chọn / di chuyển đối tượng", "S"],
+  ["moveLasso", "", "Lasso · Khoanh vùng di chuyển", "V"],
   ["hand", "✥", "Di chuyển bảng", "H"],
   ["eraser", "▱", "Tẩy đối tượng", "E"],
   ["highlight", "▰", "Bút tô sáng", "M"],
@@ -23,20 +25,40 @@ let objects = [];
 let undoStack = [];
 let redoStack = [];
 
-let view = { x: 0, y: 0, z: 1 };
-const boardScrollRange = 50000;
+let view = { x: 0, y: 0, z: 1, fit: true };
+// A4 at 96 dpi. Only visible pages are drawn; the canvas stays viewport-sized.
+const paper = { w: 794, h: 794 * 297 / 210, top: 60, gap: 28, margin: 0 };
+const paperTemplates = [
+  { id: "plain", name: "Giấy trơn" },
+  { id: "dots", name: "Giấy chấm" },
+  { id: "lined", name: "Kẻ ngang hẹp" },
+  { id: "wide", name: "Kẻ ngang rộng" },
+  { id: "grid", name: "Ô vuông" },
+  { id: "margin", name: "Kẻ ngang có lề" },
+];
+let paperColor = "#faf8e8";
+let paperBackground = "grid";
+let paperPageCount = 1;
 let boardScrollDrag = null;
+const touchPointers = new Map();
+let paperGesture = null;
 
 let tool = "pen";
 let eraserMode = "stroke";
 let color = "#245bea";
-let width = 3;
+let width = 2;
+let handwritingScale = 0.7;
 
 let active = null;
 let start = null;
 let dragging = false;
 let selection = null;
 let selected = -1;
+let lassoMode = "freeform";
+let lassoPath = null;
+let groupSelection = [];
+let groupRegion = null;
+let groupDetached = false;
 let resizeHandle = null;
 let space = false;
 let eraserCursor = null;
@@ -53,6 +75,13 @@ let saveTimer;
 let saveQueue = Promise.resolve();
 let saveRevision = 0;
 let restoringLesson = false;
+let fileImportRevision = 0;
+const sessionLessonKey = "bangtrang-session-v1";
+let boardSessionId = crypto.randomUUID();
+try {
+  boardSessionId = sessionStorage.getItem("qh-board-session") || boardSessionId;
+  sessionStorage.setItem("qh-board-session", boardSessionId);
+} catch { /* Keep a fresh board when browser storage is unavailable. */ }
 
 const images = new Map();
 const expressionCache = new Map();
@@ -72,12 +101,27 @@ function toast(message) {
   }, 3200);
 }
 
-function chooseTool(value) {
+function chooseTool(value, { preserveSelection = false, preserveLassoMode = false } = {}) {
+  const newLasso = value === "moveLasso" && !preserveSelection;
+  if (tool === "moveLasso" && (value !== tool || newLasso)) {
+    if (start?.groupMove) finishGroupMove(true);
+    dragging = false;
+    start = null;
+    clearGroupSelection();
+  }
+  if (newLasso) {
+    clearGroupSelection();
+    if (!preserveLassoMode) lassoMode = "freeform";
+    document.querySelectorAll("[data-lasso-mode]").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.lassoMode === lassoMode));
+    });
+  }
   tool = value;
   if (value !== "eraser") eraserCursor = null;
 
   document.querySelectorAll("[data-tool]").forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === value);
+    button.setAttribute("aria-pressed", String(button.dataset.tool === value));
   });
 
   const names = {
@@ -105,6 +149,12 @@ function chooseTool(value) {
 
   if (value === "select") {
     instruction = "Kéo để di chuyển đối tượng";
+  } else if (value === "moveLasso") {
+    selected = -1;
+    selection = null;
+    instruction = lassoMode === "freeform"
+      ? "Giữ chuột hoặc bút để tự vẽ đường khoanh · Thả để chọn, rồi kéo bên trong để di chuyển · V để khoanh vùng mới"
+      : "Kéo tạo vùng chữ nhật · Thả để chọn, rồi kéo bên trong để di chuyển · V để khoanh tự do";
   } else if (value === "eraser") {
     instruction = eraserMode === "object"
       ? "Kéo qua đối tượng để xóa toàn bộ"
@@ -119,6 +169,7 @@ function chooseTool(value) {
 
   $("toolStatus").textContent = `${names[value]} · ${instruction}`;
   $("eraserOptions").hidden = value !== "eraser";
+  $("lassoOptions").hidden = value !== "moveLasso";
 
   canvas.style.cursor =
     value === "hand"
@@ -130,6 +181,7 @@ function chooseTool(value) {
           : value === "eraser"
             ? "none"
           : "crosshair";
+  if (boardW) draw();
 }
 
 for (const [value, icon, name, key] of tools) {
@@ -139,12 +191,23 @@ for (const [value, icon, name, key] of tools) {
   button.title = `${name} (${key})`;
   button.setAttribute("aria-label", name);
   button.textContent = icon;
+  button.setAttribute("aria-pressed", "false");
+  if (value === "moveLasso") {
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4C10 1 3 4 3 10s5 9 11 7c5-1 6-7 2-10" stroke-dasharray="3 3"/><path d="m12 11 9 4-4 2-2 4z"/></svg>';
+  }
 
   $("toolButtons").append(button);
 }
 
 document.querySelectorAll("[data-tool]").forEach((button) => {
   button.onclick = () => chooseTool(button.dataset.tool);
+});
+
+document.querySelectorAll("[data-lasso-mode]").forEach(button => {
+  button.onclick = () => {
+    lassoMode = button.dataset.lassoMode;
+    chooseTool("moveLasso", { preserveLassoMode: true });
+  };
 });
 
 document.querySelectorAll("[data-eraser-mode]").forEach((button) => {
@@ -192,9 +255,30 @@ $("customColor").oninput = (event) => {
   setColor(event.target.value);
 };
 
-$("strokeWidth").oninput = (event) => {
-  width = Number(event.target.value);
+function updateStrokeWidth(value) {
+  const slider = $("strokeWidth");
+  width = Math.max(Number(slider.min), Math.min(Number(slider.max), Number(value)));
+  slider.value = String(width);
   $("widthValue").textContent = `${width} px`;
+  $("decreaseStrokeWidth").disabled = width <= Number(slider.min);
+  $("increaseStrokeWidth").disabled = width >= Number(slider.max);
+}
+
+$("strokeWidth").oninput = (event) => updateStrokeWidth(event.target.value);
+$("decreaseStrokeWidth").onclick = () => updateStrokeWidth(width - 1);
+$("increaseStrokeWidth").onclick = () => updateStrokeWidth(width + 1);
+updateStrokeWidth($("strokeWidth").value);
+
+try {
+  const saved = Number(localStorage.getItem("bangtrang-handwriting-scale"));
+  if (saved >= 0.4 && saved <= 1) handwritingScale = saved;
+} catch { /* Browser storage may be unavailable. */ }
+$("handwritingScale").value = String(Math.round(handwritingScale * 100));
+$("handwritingScale").onchange = (event) => {
+  handwritingScale = Number(event.target.value) / 100;
+  try {
+    localStorage.setItem("bangtrang-handwriting-scale", String(handwritingScale));
+  } catch { /* Keep the setting for this session. */ }
 };
 
 setColor(color);
@@ -205,7 +289,7 @@ chooseTool("pen");
 // =====================================================
 
 function snapshot() {
-  undoStack.push(JSON.stringify(objects));
+  undoStack.push(boardSnapshot());
 
   if (undoStack.length > 50) {
     undoStack.shift();
@@ -214,7 +298,23 @@ function snapshot() {
   redoStack = [];
 }
 
+function boardSnapshot() {
+  return JSON.stringify({ objects, paperPageCount, view,
+    background: paperBackground, paperColor });
+}
+
+function restoreBoardSnapshot(serialized) {
+  clearGroupSelection();
+  const state = JSON.parse(serialized);
+  objects = state.objects;
+  paperPageCount = state.paperPageCount;
+  view = state.view;
+  if (state.background) paperBackground = state.background;
+  if (state.paperColor) paperColor = state.paperColor;
+}
+
 function changed() {
+  if (!pdfDocumentPages().length) objects.forEach(fitObjectOnPaper);
   draw();
 
   $("saveStatus").textContent = "Đang lưu trên máy chủ…";
@@ -226,11 +326,13 @@ function changed() {
 function lessonData() {
   return {
       version: 1,
+      sessionId: boardSessionId,
       objects,
       view,
       title: $("lessonName").value,
-      background: $("background").value,
+      background: paperBackground,
       theme: document.body.dataset.theme || "light",
+      paper: { format: "a4", pages: paperPageCount, color: paperColor },
   };
 }
 
@@ -239,6 +341,15 @@ async function saveLesson() {
 
   const revision = ++saveRevision;
   const serialized = JSON.stringify(lessonData());
+  let cached = false;
+  try {
+    sessionStorage.setItem("qh-board-started", boardSessionId);
+    sessionStorage.setItem(sessionLessonKey, serialized);
+    cached = true;
+  } catch {
+    // A failed quota write must not leave an older session cache to restore.
+    try { sessionStorage.removeItem(sessionLessonKey); } catch { /* Storage unavailable. */ }
+  }
   saveQueue = saveQueue.catch(() => false).then(async () => {
     try {
       const response = await fetch("/api/lesson", {
@@ -249,12 +360,6 @@ async function saveLesson() {
 
       if (!response.ok) throw new Error("Server save failed");
 
-      try {
-        localStorage.setItem("bangtrang-v1", serialized);
-      } catch {
-        // The server remains the source of truth when the local cache is full.
-      }
-
       if (revision === saveRevision) {
         const time = new Date().toLocaleTimeString("vi-VN", {
           hour: "2-digit",
@@ -264,15 +369,10 @@ async function saveLesson() {
       }
       return true;
     } catch {
-      try {
-        localStorage.setItem("bangtrang-v1", serialized);
-        if (revision === saveRevision) {
-          $("saveStatus").textContent = "Máy chủ chưa sẵn sàng · Đã lưu dự phòng trên thiết bị";
-        }
-      } catch {
-        if (revision === saveRevision) {
-          $("saveStatus").textContent = "Không thể lưu · Hãy tải bài giảng JSON về";
-        }
+      if (revision === saveRevision) {
+        $("saveStatus").textContent = cached
+          ? "Máy chủ chưa sẵn sàng · Đã lưu trong phiên đăng nhập này"
+          : "Không thể lưu · Hãy tải bài giảng PDF về";
       }
       return false;
     }
@@ -282,20 +382,24 @@ async function saveLesson() {
 }
 
 function undo() {
+  if (start?.groupMove) finishGroupMove(true);
+  if (tool === "moveLasso") { dragging = false; start = null; }
   if (!undoStack.length) return;
 
-  redoStack.push(JSON.stringify(objects));
-  objects = JSON.parse(undoStack.pop());
+  redoStack.push(boardSnapshot());
+  restoreBoardSnapshot(undoStack.pop());
 
   selected = -1;
   changed();
 }
 
 function redo() {
+  if (start?.groupMove) finishGroupMove(true);
+  if (tool === "moveLasso") { dragging = false; start = null; }
   if (!redoStack.length) return;
 
-  undoStack.push(JSON.stringify(objects));
-  objects = JSON.parse(redoStack.pop());
+  undoStack.push(boardSnapshot());
+  restoreBoardSnapshot(redoStack.pop());
 
   selected = -1;
   changed();
@@ -323,6 +427,18 @@ function world(point) {
     x: (point.x - view.x) / view.z,
     y: (point.y - view.y) / view.z,
   };
+}
+
+function handwritingPoint(event) {
+  const point = world(screenPoint(event));
+  const scale = start.handwritingScale;
+
+  // Shrink only this stroke's movement, anchored where the pen touched down.
+  // Tool interactions and the starting position always use real coordinates.
+  return clampToPage({
+    x: start.x + (point.x - start.x) * scale,
+    y: start.y + (point.y - start.y) * scale,
+  });
 }
 
 function resize() {
@@ -622,6 +738,16 @@ function paintEditableGeometry(context, object) {
 
 function paintObject(context, object) {
   context.save();
+  for (const region of object.clipRegions || []) {
+    traceLasso(context, region);
+    context.clip("evenodd");
+  }
+  for (const region of object.cutouts || []) {
+    context.beginPath();
+    context.rect(-1e8, -1e8, 2e8, 2e8);
+    traceLasso(context, region, false);
+    context.clip("evenodd");
+  }
 
   context.strokeStyle = object.color || "#245bea";
   context.fillStyle = object.color || "#24304a";
@@ -991,96 +1117,225 @@ function paintObject(context, object) {
   context.restore();
 }
 
-function draw() {
-  view.y = Math.max(-boardScrollRange, Math.min(0, view.y));
-  view.z = 1;
-  if (!boardW) return;
+function pdfDocumentPages() {
+  return objects.filter(object => object.pdfBackground);
+}
 
-  const dpr = window.devicePixelRatio || 1;
+function paperPage(index) {
+  return { x: 0, y: paper.top + index * (paper.h + paper.gap), w: paper.w, h: paper.h };
+}
 
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = "#fafbfe";
-  ctx.fillRect(0, 0, boardW, boardH);
+function pageAt(point) {
+  const pdfPages = pdfDocumentPages();
+  const page = pdfPages.length
+    ? pdfPages.find(item => point.x >= item.x && point.x <= item.x + item.w
+      && point.y >= item.y && point.y <= item.y + item.h)
+    : paperPage(Math.max(0, Math.floor((point.y - paper.top) / (paper.h + paper.gap))));
+  return page && point.x >= page.x && point.x <= page.x + page.w
+    && point.y >= page.y && point.y <= page.y + page.h ? page : null;
+}
 
-  const step = 18;
-  const background = $("background").value;
-  const theme = document.body.dataset.theme === "dark" ? "dark" : "light";
-  const boardBg = theme === "dark"
-    ? "#0d1320"
-    : background === "plain"
-      ? "#fafbfe"
-      : "#fffefa";
-  const minorGrid = theme === "dark" ? "rgba(148, 163, 184, 0.34)" : "#9fb2ca";
-  const majorGrid = theme === "dark" ? "rgba(148, 163, 184, 0.48)" : "#8fa8c6";
+function clampToPage(point, page = start?.page) {
+  if (!page) return point;
+  const margin = paper.margin;
+  return { ...point, x: Math.max(page.x + margin, Math.min(page.x + page.w - margin, point.x)),
+    y: Math.max(page.y + margin, Math.min(page.y + page.h - margin, point.y)) };
+}
 
-  ctx.fillStyle = boardBg;
-  ctx.fillRect(0, 0, boardW, boardH);
+// Keep objects on the sheet while allowing writing all the way to its edges.
+function scalePaperObject(object, scale) {
+  if (scale >= 1) return;
+  const box = bounds(object);
+  for (const points of [object.points, object.vertices]) points?.forEach(point => {
+    point.x = box.x + (point.x - box.x) * scale;
+    point.y = box.y + (point.y - box.y) * scale;
+  });
+  for (const region of [...(object.clipRegions || []), ...(object.cutouts || [])]) {
+    region.forEach(point => {
+      point.x = box.x + (point.x - box.x) * scale;
+      point.y = box.y + (point.y - box.y) * scale;
+    });
+  }
+  if (Number.isFinite(object.x)) object.x = box.x + (object.x - box.x) * scale;
+  if (Number.isFinite(object.y)) object.y = box.y + (object.y - box.y) * scale;
+  if (Number.isFinite(object.w)) object.w *= scale;
+  if (Number.isFinite(object.h)) object.h *= scale;
+  if (object.type === "text") object.size = (object.size || 24) * scale;
+  if (object.width) object.width *= scale;
+}
 
-  if (background !== "plain") {
-    const firstColumn = Math.floor(-view.x / step);
-    const firstRow = Math.floor(-view.y / step);
+function fitObjectOnPaper(object) {
+  if (object.freePosition) return;
+  let box = bounds(object);
+  const index = Math.max(0, Math.floor((box.y - paper.top) / (paper.h + paper.gap)));
+  const page = paperPage(index);
+  const inset = paper.margin;
+  scalePaperObject(object, Math.min(1, (page.w - inset * 2) / (box.w || 1),
+    (page.h - inset * 2) / (box.h || 1)));
+  box = bounds(object);
+  const x = Math.max(inset, Math.min(page.w - inset - box.w, box.x));
+  const y = Math.max(page.y + inset, Math.min(page.y + page.h - inset - box.h, box.y));
+  moveObject(object, x - box.x, y - box.y);
+}
 
-    if (background === "lined") {
-      for (let row = firstRow; view.y + row * step <= boardH; row++) {
-        const y = view.y + row * step;
-        const majorLine = row % 5 === 0;
+function migrateLegacyPaper() {
+  if (!objects.length || pdfDocumentPages().length) return;
+  const boxes = objects.map(bounds);
+  const left = Math.min(...boxes.map(box => box.x));
+  const top = Math.min(...boxes.map(box => box.y));
+  const right = Math.max(...boxes.map(box => box.x + box.w));
+  const scale = Math.min(1, (paper.w - paper.margin * 2) / (right - left || 1));
+  const contentHeight = paper.h - paper.margin * 2;
+  for (const object of objects) {
+    const box = bounds(object);
+    scalePaperObject(object, scale);
+    const offsetY = (box.y - top) * scale;
+    const index = Math.floor(offsetY / contentHeight);
+    const nextY = paperPage(index).y + paper.margin + offsetY % contentHeight;
+    moveObject(object, paper.margin + (box.x - left) * scale - box.x, nextY - box.y);
+    fitObjectOnPaper(object);
+  }
+  paperPageCount = contentPageCount();
+  view.y = 0;
+}
 
-        ctx.strokeStyle = majorLine ? majorGrid : minorGrid;
-        ctx.lineWidth = majorLine ? 1.2 : 0.85;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(boardW, y);
-        ctx.stroke();
+function contentPageCount(items = objects) {
+  let bottom = paper.top;
+  for (const item of items) {
+    const box = bounds(item);
+    bottom = Math.max(bottom, box.y + box.h + (item.width || 0) / 2);
+  }
+  return Math.max(1, Math.floor((bottom - paper.top) / (paper.h + paper.gap)) + 1);
+}
+
+function visiblePages() {
+  const pdfPages = pdfDocumentPages();
+  if (pdfPages.length) return pdfPages.filter(page =>
+    page.y * view.z + view.y <= boardH && (page.y + page.h) * view.z + view.y >= 0);
+  const first = Math.max(0, Math.floor((-view.y / view.z - paper.top) / (paper.h + paper.gap)));
+  const last = Math.min(paperPageCount - 1,
+    Math.floor(((boardH - view.y) / view.z - paper.top) / (paper.h + paper.gap)));
+  const pages = [];
+  for (let index = first; index <= last; index++) pages.push(paperPage(index));
+  return pages;
+}
+
+function extendPaperForScroll() {
+  if (pdfDocumentPages().length) return;
+  const bottom = (boardH - view.y) / view.z;
+  paperPageCount = Math.max(paperPageCount,
+    Math.ceil((bottom + 120 - paper.top + paper.gap) / (paper.h + paper.gap)));
+}
+
+function scrollRange() {
+  const pages = pdfDocumentPages();
+  const bottom = pages.length ? Math.max(...pages.map(page => page.y + page.h))
+    : paperPage(paperPageCount - 1).y + paper.h;
+  return Math.max(0, bottom * view.z + 100 - boardH);
+}
+
+function paintPaper(context, page, guides = false, background = paperBackground,
+  surfaceColor = paperColor) {
+  context.save();
+  context.fillStyle = page.pdfBackground ? "#fff" : surfaceColor;
+  context.fillRect(page.x, page.y, page.w, page.h);
+  context.beginPath();
+  context.rect(page.x, page.y, page.w, page.h);
+  context.clip();
+  const left = page.x, right = page.x + page.w;
+  const top = page.y, bottom = page.y + page.h;
+  const rgb = surfaceColor.slice(1).match(/.{2}/g).map(value => parseInt(value, 16));
+  const dark = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722 < 128;
+  if (background !== "plain" && !page.pdfBackground) {
+    context.strokeStyle = dark ? "rgba(255,255,255,.18)" : "rgba(91,105,111,.2)";
+    context.fillStyle = dark ? "rgba(255,255,255,.35)" : "rgba(91,105,111,.35)";
+    context.lineWidth = 0.7;
+    const step = background === "wide" ? 30 : background === "grid" ? 28 : 18;
+    if (["grid", "lined", "wide", "margin"].includes(background)) {
+      context.beginPath();
+      for (let y = top + step; y < bottom; y += step) {
+        context.moveTo(left, y); context.lineTo(right, y);
       }
-
-    } else if (background === "grid") {
-      for (let column = firstColumn; view.x + column * step <= boardW; column++) {
-        const x = view.x + column * step;
-        const majorLine = column % 5 === 0;
-
-        ctx.strokeStyle = majorLine ? majorGrid : minorGrid;
-        ctx.lineWidth = majorLine ? 1.25 : 1.15;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, boardH);
-        ctx.stroke();
+      if (background === "grid") for (let x = left; x <= right; x += step) {
+        context.moveTo(x, top); context.lineTo(x, bottom);
       }
-
-      for (let row = firstRow; view.y + row * step <= boardH; row++) {
-        const y = view.y + row * step;
-        const majorLine = row % 5 === 0;
-
-        ctx.strokeStyle = majorLine ? majorGrid : minorGrid;
-        ctx.lineWidth = majorLine ? 1.25 : 1.15;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(boardW, y);
-        ctx.stroke();
+      context.stroke();
+      if (background === "margin") {
+        context.strokeStyle = dark ? "rgba(255,161,161,.45)" : "rgba(207,104,104,.4)";
+        context.beginPath();
+        context.moveTo(left + 64, top); context.lineTo(left + 64, bottom);
+        context.stroke();
       }
-    } else {
-      ctx.fillStyle = theme === "dark" ? "rgba(148, 163, 184, 0.54)" : "#aabbd1";
-
-      for (let column = firstColumn; view.x + column * step <= boardW; column++) {
-        const x = view.x + column * step;
-
-        for (let row = firstRow; view.y + row * step <= boardH; row++) {
-          ctx.beginPath();
-          ctx.arc(x, view.y + row * step, 1.1, 0, Math.PI * 2);
-          ctx.fill();
-        }
+    } else if (background === "dots") {
+      for (let x = left; x <= right; x += step) for (let y = top; y < bottom; y += step) {
+        context.beginPath(); context.arc(x, y, 0.8, 0, Math.PI * 2); context.fill();
       }
     }
   }
+  context.restore();
+}
 
+function draw() {
+  if (!boardW) return;
+  const pdfPages = pdfDocumentPages();
+  const documentMode = pdfPages.length > 0;
+  document.body.classList.toggle("pdf-document-mode", documentMode);
+  document.body.classList.add("paper-mode");
+  if (!documentMode) paperPageCount = Math.max(paperPageCount, contentPageCount());
+  const pageWidth = documentMode ? Math.max(...pdfPages.map(page => page.x + page.w)) : paper.w;
+  if (view.fit !== false) {
+    const previousScale = view.z;
+    view.z = Math.min(1, Math.max(0.1, (boardW - (boardW > 600 ? 180 : 40)) / pageWidth));
+    view.y *= view.z / previousScale;
+  } else {
+    view.z = Math.max(0.1, Math.min(4, view.z));
+  }
+  if (view.fit !== false || pageWidth * view.z <= boardW - 48) {
+    view.x = (boardW - pageWidth * view.z) / 2;
+  } else {
+    view.x = Math.max(boardW - pageWidth * view.z - 24, Math.min(24, view.x));
+  }
+  view.y = Math.max(-scrollRange(), Math.min(0, view.y));
+  const pages = visiblePages();
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = paperSurround;
+  ctx.fillRect(0, 0, boardW, boardH);
   ctx.save();
   ctx.translate(view.x, view.y);
   ctx.scale(view.z, view.z);
 
-  objects.forEach((object) => paintObject(ctx, object));
-
-  if (active && tool !== "select") {
-    paintObject(ctx, active);
+  for (const page of pages) {
+    ctx.save();
+    ctx.shadowColor = "rgba(15,23,42,.16)";
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 3;
+    ctx.fillStyle = page.pdfBackground ? "#fff" : paperColor;
+    ctx.fillRect(page.x, page.y, page.w, page.h);
+    ctx.restore();
+    paintPaper(ctx, page, true);
+    if (!documentMode) {
+      ctx.fillStyle = "#64748b";
+      ctx.font = "12px Segoe UI, Arial";
+      const number = Math.round((page.y - paper.top) / (paper.h + paper.gap)) + 1;
+      ctx.fillText(`A4 · Trang ${number}`, page.x + page.w - 96, page.y - 10);
+    }
   }
+  const pageClip = new Path2D();
+  pages.forEach(page => pageClip.rect(page.x, page.y, page.w, page.h));
+  objects.forEach(object => {
+    const box = bounds(object);
+    if ((box.y + box.h + 24) * view.z + view.y >= 0 && (box.y - 24) * view.z + view.y <= boardH) {
+      ctx.save();
+      if (!object.freePosition) ctx.clip(pageClip);
+      paintObject(ctx, object);
+      ctx.restore();
+    }
+  });
+  ctx.save();
+  ctx.clip(pageClip);
+  if (active && tool !== "select") paintObject(ctx, active);
+  ctx.restore();
 
   if (selected >= 0 && objects[selected]) {
     const box = bounds(objects[selected]);
@@ -1096,7 +1351,8 @@ function draw() {
       box.h + 10,
     );
 
-    const handles = selectionHandles(box);
+    const masked = objects[selected].clipRegions?.length || objects[selected].cutouts?.length;
+    const handles = masked ? [] : selectionHandles(box);
     ctx.setLineDash([]);
     ctx.fillStyle = "#245bea";
 
@@ -1109,7 +1365,7 @@ function draw() {
       );
     }
 
-    if (objects[selected].vertices) {
+    if (objects[selected].vertices && !masked) {
       ctx.lineWidth = 1.5 / view.z;
 
       for (const vertex of objects[selected].vertices) {
@@ -1144,6 +1400,8 @@ function draw() {
     );
   }
 
+  drawGroupSelection();
+
   ctx.restore();
 
   if (tool === "eraser" && eraserCursor) {
@@ -1159,12 +1417,27 @@ function draw() {
     ctx.restore();
   }
 
-  $("welcome").hidden = objects.length > 0 || Boolean(active);
+  $("welcome").hidden = objects.length > 0 || Boolean(active) || view.y < -100;
+  const pageIndex = documentMode
+    ? Math.max(0, pdfPages.findIndex(page => (page.y + page.h) * view.z + view.y > boardH / 2))
+    : Math.max(0, Math.min(paperPageCount - 1,
+      Math.floor(((boardH / 2 - view.y) / view.z - paper.top) / (paper.h + paper.gap))));
+  $("pageStatus").textContent = `Trang ${pageIndex + 1} / ${documentMode ? pdfPages.length : paperPageCount}`;
+  $("addPageBtn").hidden = documentMode;
+  $("clearInkBtn").disabled = !objects.some(isInkObject);
+  $("removeFilesBtn").disabled = !objects.some(isUploadedObject);
+  $("clearBtn").disabled = !objects.length && paperPageCount === 1;
   $("objectCount").textContent = `${objects.length} đối tượng`;
   $("undoBtn").disabled = !undoStack.length;
   $("redoBtn").disabled = !redoStack.length;
   $("resetView").textContent = `${Math.round(view.z * 100)}%`;
   updateBoardScrollbar();
+  if (tool === "moveLasso") {
+    const button = document.querySelector('[data-tool="moveLasso"]').getBoundingClientRect();
+    const workspace = $("workspace").getBoundingClientRect();
+    $("lassoOptions").style.left = `${button.right - workspace.left + 12}px`;
+    $("lassoOptions").style.top = `${button.top - workspace.top + button.height / 2}px`;
+  }
 }
 
 // =====================================================
@@ -1172,6 +1445,20 @@ function draw() {
 // =====================================================
 
 function bounds(object) {
+  const box = rawBounds(object);
+  for (const region of object.clipRegions || []) {
+    const clip = rawBounds({ points: region });
+    const right = Math.min(box.x + box.w, clip.x + clip.w);
+    const bottom = Math.min(box.y + box.h, clip.y + clip.h);
+    box.x = Math.max(box.x, clip.x);
+    box.y = Math.max(box.y, clip.y);
+    box.w = Math.max(0, right - box.x);
+    box.h = Math.max(0, bottom - box.y);
+  }
+  return box;
+}
+
+function rawBounds(object) {
   if (object.points) {
     let minX = Infinity;
     let minY = Infinity;
@@ -1238,6 +1525,9 @@ function syncGeometryBounds(object) {
 
 function hit(point) {
   for (let i = objects.length - 1; i >= 0; i--) {
+    if (objects[i].pdfBackground) continue;
+    if ((objects[i].clipRegions || []).some(region => !pointInLasso(point, region))
+        || (objects[i].cutouts || []).some(region => pointInLasso(point, region))) continue;
     const box = bounds(objects[i]);
     const padding = 8 / view.z;
 
@@ -1360,13 +1650,24 @@ function segmentTouchesBounds(startPoint, endPoint, box, radius) {
   );
 }
 
+function isUploadedObject(object) {
+  return object.type === "image" || object.type === "document"
+    || Boolean(object.pdfBackground || object.pdfPage);
+}
+
+function isInkObject(object) {
+  return ["pen", "highlight"].includes(object.type) && !isUploadedObject(object);
+}
+
 function eraseAlong(eraserStart, eraserEnd) {
   const radius = 12 / view.z;
   const updatedObjects = [];
   let changedObjects = false;
 
   for (const object of objects) {
-    if (object.type === "pen" || object.type === "highlight") {
+    if (isUploadedObject(object)) {
+      updatedObjects.push(object);
+    } else if (object.type === "pen" || object.type === "highlight") {
       const strokeRadius = radius + (object.width || 1) / 2;
       const remainingRuns = splitStrokeAtEraser(
         object,
@@ -1411,6 +1712,7 @@ function eraseObjectAt(point) {
   const index = hit(point);
 
   if (index < 0) return false;
+  if (isUploadedObject(objects[index])) return false;
 
   if (!start.eraserSnapshot) {
     snapshot();
@@ -1423,6 +1725,9 @@ function eraseObjectAt(point) {
 }
 
 function moveObject(object, dx, dy) {
+  for (const region of [...(object.clipRegions || []), ...(object.cutouts || [])]) {
+    region.forEach(point => { point.x += dx; point.y += dy; });
+  }
   if (object.points) {
     object.points.forEach((point) => {
       point.x += dx;
@@ -1439,6 +1744,159 @@ function moveObject(object, dx, dy) {
     object.x += dx;
     object.y += dy;
   }
+}
+
+// A lasso cuts visible content with vector masks; moving it never resamples it.
+function clearGroupSelection() {
+  groupSelection = [];
+  groupRegion = null;
+  groupDetached = false;
+  lassoPath = null;
+  $("selectionNote").hidden = true;
+}
+
+function groupBounds() {
+  return groupRegion ? bounds({ points: groupRegion }) : null;
+}
+
+function insideGroup(point) {
+  return groupRegion && pointInLasso(point, groupRegion);
+}
+
+function pointInLasso(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[j], b = polygon[i];
+    const cross = (point.x - a.x) * (b.y - a.y) - (point.y - a.y) * (b.x - a.x);
+    if (Math.abs(cross) < 1e-7 && point.x >= Math.min(a.x, b.x) - 1e-7
+        && point.x <= Math.max(a.x, b.x) + 1e-7 && point.y >= Math.min(a.y, b.y) - 1e-7
+        && point.y <= Math.max(a.y, b.y) + 1e-7) return true;
+    if ((a.y > point.y) !== (b.y > point.y)
+        && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function traceLasso(context, region, begin = true, close = true) {
+  if (begin) context.beginPath();
+  context.moveTo(region[0].x, region[0].y);
+  for (let index = 1; index < region.length; index++) context.lineTo(region[index].x, region[index].y);
+  if (close) context.closePath();
+}
+
+function visibleContentInLasso(object, polygon, area) {
+  const box = bounds(object);
+  // Include pen pressure, highlight width, and labels around geometry.
+  const padding = Math.max(32, (object.width || 3) * 6);
+  const x = Math.max(area.x, box.x - padding);
+  const y = Math.max(area.y, box.y - padding);
+  const right = Math.min(area.x + area.w, box.x + box.w + padding);
+  const bottom = Math.min(area.y + area.h, box.y + box.h + padding);
+  if (right <= x || bottom <= y) return false;
+  // Rasterization is only a hit test. The stored content remains unchanged.
+  const scale = Math.min(1, 192 / Math.max(right - x, bottom - y));
+  const surface = document.createElement("canvas");
+  surface.width = Math.max(1, Math.ceil((right - x) * scale));
+  surface.height = Math.max(1, Math.ceil((bottom - y) * scale));
+  const context = surface.getContext("2d", { willReadFrequently: true });
+  context.scale(scale, scale);
+  context.translate(-x, -y);
+  traceLasso(context, polygon);
+  context.clip("evenodd");
+  paintObject(context, object);
+  const pixels = context.getImageData(0, 0, surface.width, surface.height).data;
+  for (let index = 3; index < pixels.length; index += 4) if (pixels[index]) return true;
+  return false;
+}
+
+function completeLasso() {
+  if (!lassoPath || lassoPath.length < 3) { clearGroupSelection(); return; }
+  const box = bounds({ points: lassoPath });
+  if (box.w * view.z < 6 || box.h * view.z < 6) { clearGroupSelection(); return; }
+  groupRegion = lassoPath.map(point => ({ ...point }));
+  groupSelection = objects.filter(object => visibleContentInLasso(object, groupRegion, box));
+  lassoPath = null;
+  if (!groupSelection.length) {
+    groupRegion = null;
+    toast("Vùng khoanh chưa có nội dung. Hãy khoanh phần bạn muốn di chuyển.");
+    return;
+  }
+  $("selectionNote").textContent = "Đã khoanh vùng · Kéo bên trong để di chuyển · V để tự khoanh vùng mới · Esc để bỏ chọn";
+  $("selectionNote").hidden = false;
+  canvas.style.cursor = "grab";
+}
+
+function drawGroupSelection() {
+  if (tool !== "moveLasso") return;
+  ctx.save();
+  ctx.strokeStyle = "#245bea";
+  ctx.fillStyle = "rgba(36, 91, 234, 0.08)";
+  ctx.lineWidth = 1.5 / view.z;
+  ctx.setLineDash([6 / view.z, 4 / view.z]);
+  const region = lassoPath || groupRegion;
+  if (region?.length) {
+    const openFreeform = lassoPath && lassoMode === "freeform";
+    traceLasso(ctx, region, true, !openFreeform);
+    if (lassoPath && !openFreeform) ctx.fill("evenodd");
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function moveLassoGroup(point) {
+  const dx = point.x - start.x, dy = point.y - start.y;
+  if (!start.groupSnapshot) {
+    if (Math.hypot(dx, dy) * view.z < 2) return;
+    start.previousRedo = redoStack;
+    start.previousUndo = undoStack.slice();
+    start.boardBeforeCut = boardSnapshot();
+    start.sourceIndices = groupSelection.map(object => objects.indexOf(object));
+    start.originalRegion = groupRegion.map(point => ({ ...point }));
+    start.originalDetached = groupDetached;
+    snapshot();
+    start.groupSnapshot = true;
+    if (!groupDetached) {
+      const pieces = [];
+      for (const object of groupSelection) {
+        const piece = JSON.parse(JSON.stringify(object));
+        piece.clipRegions = [...(piece.clipRegions || []), groupRegion.map(point => ({ ...point }))];
+        piece.freePosition = true;
+        delete piece.pdfBackground;
+        delete piece.pdfPage;
+        object.cutouts = [...(object.cutouts || []), groupRegion.map(point => ({ ...point }))];
+        object.freePosition = true;
+        pieces.push(piece);
+      }
+      objects.push(...pieces);
+      groupSelection = pieces;
+      groupDetached = true;
+    }
+  }
+  groupSelection.forEach(object => moveObject(object, dx - start.groupDx, dy - start.groupDy));
+  groupRegion.forEach(point => { point.x += dx - start.groupDx; point.y += dy - start.groupDy; });
+  start.groupDx = dx;
+  start.groupDy = dy;
+}
+
+function finishGroupMove(cancel = false) {
+  if (!start?.groupMove) return;
+  const moved = start.groupSnapshot && (start.groupDx !== 0 || start.groupDy !== 0);
+  if (start.groupSnapshot && (cancel || !moved)) {
+    const state = start;
+    restoreBoardSnapshot(state.boardBeforeCut);
+    groupSelection = state.sourceIndices.map(index => objects[index]);
+    groupRegion = state.originalRegion;
+    groupDetached = state.originalDetached;
+    undoStack = state.previousUndo;
+    redoStack = state.previousRedo;
+    $("selectionNote").textContent = "Kéo trong vùng khoanh để di chuyển nguyên kích thước · Esc để bỏ chọn";
+    $("selectionNote").hidden = false;
+  }
+  start = null;
+  dragging = false;
+  canvas.style.cursor = "grab";
+  if (moved && !cancel) changed();
+  else draw();
 }
 
 function resizeObject(object, handle, dx, dy) {
@@ -1567,6 +2025,7 @@ function hitResizeHandle(point) {
   if (index < 0) return null;
   const box = bounds(objects[index]);
   const object = objects[index];
+  if (object.clipRegions?.length || object.cutouts?.length) return null;
 
   if (object.vertices) {
     const vertexPadding = 10 / view.z;
@@ -1602,12 +2061,38 @@ function hitResizeHandle(point) {
 // =====================================================
 
 canvas.onpointerdown = (event) => {
+  if (event.pointerType === "touch") {
+    touchPointers.set(event.pointerId, screenPoint(event));
+    canvas.setPointerCapture(event.pointerId);
+    if (touchPointers.size >= 2) {
+      if (start?.groupMove) finishGroupMove(true);
+      clearGroupSelection();
+      const [a, b] = [...touchPointers.values()];
+      const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      paperGesture = { distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+        anchor: world(center), z: view.z };
+      active = null;
+      dragging = false;
+      start = null;
+      selection = null;
+      draw();
+      return;
+    }
+    if (paperGesture) return;
+  }
   if (event.button !== 0 && event.button !== 1) return;
+  if (tool === "moveLasso" && dragging) return;
 
   const screen = screenPoint(event);
-  const point = world(screen);
+  const rawPoint = world(screen);
+  const page = pageAt(rawPoint);
+  const pan = space || tool === "hand" || event.button === 1;
+  if (!pan && !page && tool !== "moveLasso") return;
+  const point = pan || tool === "select" || tool === "moveLasso" ? rawPoint : clampToPage(rawPoint, page);
 
   start = {
+    pointerId: event.pointerId,
+    page,
     ...point,
     sx: screen.x,
     sy: screen.y,
@@ -1626,6 +2111,24 @@ canvas.onpointerdown = (event) => {
   if (tool === "text") {
     dragging = false;
     openText(point);
+    return;
+  }
+
+  if (tool === "moveLasso") {
+    selected = -1;
+    selection = null;
+    if (insideGroup(point)) {
+      start.groupMove = true;
+      start.groupBox = groupBounds();
+      start.groupDx = 0;
+      start.groupDy = 0;
+      canvas.style.cursor = "grabbing";
+    } else {
+      clearGroupSelection();
+      lassoPath = [{ x: point.x, y: point.y }];
+      canvas.style.cursor = "crosshair";
+    }
+    draw();
     return;
   }
 
@@ -1703,6 +2206,7 @@ canvas.onpointerdown = (event) => {
   }
 
   if (tool === "pen" || tool === "highlight") {
+    start.handwritingScale = event.pointerType === "pen" ? handwritingScale : 1;
     active = {
       type: tool,
       color,
@@ -1734,7 +2238,49 @@ canvas.onpointerdown = (event) => {
 
 canvas.onpointermove = (event) => {
   const screen = screenPoint(event);
-  const point = world(screen);
+  if (touchPointers.has(event.pointerId)) touchPointers.set(event.pointerId, screen);
+  if (paperGesture) {
+    if (touchPointers.size >= 2) {
+      const [a, b] = [...touchPointers.values()];
+      const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+      view.fit = false;
+      view.z = Math.max(0.1, Math.min(4,
+        paperGesture.z * Math.pow(distance / paperGesture.distance, 0.5)));
+      view.x = (a.x + b.x) / 2 - paperGesture.anchor.x * view.z;
+      view.y = (a.y + b.y) / 2 - paperGesture.anchor.y * view.z;
+      draw();
+    }
+    return;
+  }
+  const rawPoint = world(screen);
+  const point = dragging && !start.pan && tool !== "select" && tool !== "moveLasso" ? clampToPage(rawPoint) : rawPoint;
+
+  if (tool === "moveLasso") {
+    if (!dragging) {
+      canvas.style.cursor = space ? "grab" : insideGroup(point) ? "grab" : "crosshair";
+      return;
+    }
+    if (event.pointerId !== start.pointerId) return;
+    if (!start.pan) {
+      if (start.groupMove) {
+        moveLassoGroup(point);
+      } else if (lassoMode === "rectangle") {
+        lassoPath = [{ x: start.x, y: start.y }, { x: point.x, y: start.y },
+          { x: point.x, y: point.y }, { x: start.x, y: point.y }];
+      } else {
+        const events = event.getCoalescedEvents?.();
+        for (const item of events?.length ? events : [event]) {
+          const next = world(screenPoint(item));
+          const last = lassoPath[lassoPath.length - 1];
+          if (Math.hypot(next.x - last.x, next.y - last.y) * view.z >= 1) {
+            lassoPath.push({ x: next.x, y: next.y });
+          }
+        }
+      }
+      draw();
+      return;
+    }
+  }
 
   if (!dragging) {
     if (tool === "eraser") {
@@ -1765,8 +2311,8 @@ canvas.onpointermove = (event) => {
 
   if (start.pan) {
     view.x = start.vx + screen.x - start.sx;
-    view.y = start.vy + screen.y - start.sy;
-
+    view.y = Math.min(0, start.vy + screen.y - start.sy);
+    extendPaperForScroll();
     draw();
     return;
   }
@@ -1778,7 +2324,7 @@ canvas.onpointermove = (event) => {
     if (!events || events.length === 0) events = [event];
 
     for (const item of events) {
-      const nextPoint = world(screenPoint(item));
+      const nextPoint = clampToPage(world(screenPoint(item)));
       if (eraserMode === "object") {
         eraseObjectAt(nextPoint);
       } else {
@@ -1838,7 +2384,7 @@ canvas.onpointermove = (event) => {
 
       for (const item of events) {
         active.points.push({
-          ...world(screenPoint(item)),
+          ...handwritingPoint(item),
           p:
             item.pointerType === "pen"
               ? Math.max(0.2, item.pressure * 2)
@@ -2124,19 +2670,22 @@ function eraseWithScratch(stroke) {
   };
   const targets = new Set();
   objects.forEach((object, index) => {
-    if (!["pen", "highlight", "text", "image"].includes(object.type)) return;
+    if (!isInkObject(object)) return;
     let crossings = 0;
     for (const pass of passes) {
       if (intersects(pass, object)) crossings++;
       if (crossings >= 3) { targets.add(index); break; }
     }
   });
-  if (!targets.size) return false;
+  if (!targets.size) {
+    toast("Không có nét viết trong vùng gạch xóa.");
+    return true;
+  }
   snapshot();
   objects = objects.filter((_, index) => !targets.has(index));
   selected = -1;
   selection = null;
-  toast(`Đã xóa nhanh ${targets.size} đối tượng. Ctrl + Z để hoàn tác.`);
+  toast(`Đã xóa ${targets.size} nét viết. Ctrl + Z để hoàn tác.`);
   return true;
 }
 
@@ -2148,6 +2697,16 @@ function finish() {
 
   if (start.pan) {
     saveLesson();
+    return;
+  }
+
+  if (tool === "moveLasso") {
+    if (start.groupMove) finishGroupMove();
+    else {
+      completeLasso();
+      start = null;
+      draw();
+    }
     return;
   }
 
@@ -2235,8 +2794,33 @@ function finish() {
   changed();
 }
 
-canvas.onpointerup = finish;
-canvas.onpointercancel = finish;
+function finishPointer(event) {
+  touchPointers.delete(event.pointerId);
+  if (paperGesture) {
+    if (!touchPointers.size) {
+      paperGesture = null;
+      saveLesson();
+    }
+    return;
+  }
+  if (tool === "moveLasso" && dragging) {
+    if (event.pointerId !== start.pointerId) return;
+    if (event.type === "pointercancel") {
+      if (start.groupMove) finishGroupMove(true);
+      else {
+        clearGroupSelection();
+        start = null;
+        dragging = false;
+        draw();
+      }
+      return;
+    }
+    canvas.onpointermove(event);
+  }
+  finish();
+}
+canvas.onpointerup = finishPointer;
+canvas.onpointercancel = finishPointer;
 canvas.onpointerleave = () => {
   if (dragging || tool !== "eraser") return;
 
@@ -2252,8 +2836,11 @@ function zoom(
   factor,
   point = { x: boardW / 2, y: boardH / 2 },
 ) {
-  view.z = 1;
-
+  const anchor = world(point);
+  view.fit = false;
+  view.z = Math.max(0.1, Math.min(4, view.z * factor));
+  view.x = point.x - anchor.x * view.z;
+  view.y = point.y - anchor.y * view.z;
   draw();
 }
 
@@ -2264,18 +2851,20 @@ function updateBoardScrollbar() {
   if (!rail || !thumb) return;
 
   const trackHeight = rail.firstElementChild.clientHeight;
+  const worldOffset = -view.y;
+  const range = scrollRange();
+  thumb.style.height = `${Math.min(trackHeight, Math.max(32, trackHeight * boardH / (boardH + range)))}px`;
   const travel = Math.max(0, trackHeight - thumb.offsetHeight);
-  const worldOffset = -view.y / view.z;
   const ratio = Math.max(
     0,
-    Math.min(1, worldOffset / boardScrollRange),
+    Math.min(1, worldOffset / (range || 1)),
   );
 
   thumb.style.top = `${travel * ratio}px`;
   rail.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
   rail.setAttribute(
     "aria-valuetext",
-    `${Math.round(worldOffset)} đơn vị bảng`,
+    $("pageStatus").textContent,
   );
 }
 
@@ -2292,7 +2881,8 @@ $("boardScroll").onpointerdown = (event) => {
       Math.min(travel, event.clientY - trackRect.top - thumb.offsetHeight / 2),
     );
     const ratio = thumbTop / travel;
-    view.y = -ratio * boardScrollRange;
+    view.y = -ratio * scrollRange();
+    extendPaperForScroll();
     draw();
   }
 
@@ -2301,6 +2891,7 @@ $("boardScroll").onpointerdown = (event) => {
     startY: event.clientY,
     startViewY: view.y,
     travel,
+    range: scrollRange(),
   };
 
   rail.setPointerCapture(event.pointerId);
@@ -2310,9 +2901,10 @@ $("boardScroll").onpointerdown = (event) => {
 $("boardScroll").onpointermove = (event) => {
   if (!boardScrollDrag || event.pointerId !== boardScrollDrag.pointerId) return;
 
-  const scale = boardScrollRange / boardScrollDrag.travel;
+  const scale = boardScrollDrag.range / boardScrollDrag.travel;
   view.y = boardScrollDrag.startViewY -
     (event.clientY - boardScrollDrag.startY) * scale;
+  extendPaperForScroll();
   draw();
 };
 
@@ -2337,7 +2929,8 @@ $("boardScroll").onkeydown = (event) => {
   if (!direction) return;
 
   event.preventDefault();
-  view.y += direction * 120;
+  view.y += direction * (event.key.startsWith("Page") ? boardH * 0.85 : 120);
+  extendPaperForScroll();
   draw();
   saveLesson();
 };
@@ -2348,9 +2941,18 @@ canvas.addEventListener(
     event.preventDefault();
 
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? boardH : 1;
-    view.y = Math.max(-boardScrollRange, Math.min(0, view.y - event.deltaY * unit));
-    view.z = 1;
-    draw();
+    if (event.ctrlKey || event.metaKey) {
+      // Cap each wheel event and use a gentle curve for controllable zoom.
+      const delta = Math.max(-80, Math.min(80, event.deltaY * unit));
+      zoom(Math.exp(-delta * 0.001), screenPoint(event));
+    } else {
+      view.x -= (event.shiftKey ? event.deltaY : event.deltaX) * unit;
+      if (!event.shiftKey) {
+        view.y = Math.min(0, view.y - event.deltaY * unit);
+        extendPaperForScroll();
+      }
+      draw();
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveLesson, 600);
   },
@@ -2364,31 +2966,215 @@ $("toggleSidebar").onclick = () => {
 };
 
 $("resetView").onclick = () => {
-  view = { x: 0, y: 0, z: 1 };
-  draw();
-};
-
-$("background").onchange = () => {
+  view = { x: 0, y: 0, z: 1, fit: true };
   draw();
   saveLesson();
 };
 
-$("clearBtn").onclick = () => {
-  if (!objects.length) return;
+$("zoomIn").onclick = () => { zoom(1.05); saveLesson(); };
+$("zoomOut").onclick = () => { zoom(1 / 1.05); saveLesson(); };
 
-  const accepted = confirm(
-    "Xóa toàn bộ nội dung bảng? Bạn vẫn có thể hoàn tác.",
-  );
+$("addPageBtn").onclick = () => {
+  if (pdfDocumentPages().length) return;
+  snapshot();
+  paperPageCount++;
+  view.y = -paperPage(paperPageCount - 1).y * view.z + 60;
+  changed();
+  toast(`Đã thêm trang A4 số ${paperPageCount}.`);
+};
 
-  if (accepted) {
+// Template previews use the same painter as the board, AI captures and exports.
+let paperDraft = null;
+function renderPaperTemplates() {
+  const grid = $("paperTemplateGrid");
+  if (!grid.children.length) {
+    for (const template of paperTemplates) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "paper-template";
+      button.dataset.template = template.id;
+      const preview = document.createElement("canvas");
+      preview.width = 210;
+      preview.height = 297;
+      preview.setAttribute("aria-hidden", "true");
+      const label = document.createElement("strong");
+      label.textContent = template.name;
+      button.append(preview, label);
+      button.onclick = () => { paperDraft.background = template.id; renderPaperTemplates(); };
+      grid.append(button);
+    }
+  }
+  for (const button of grid.children) {
+    button.setAttribute("aria-pressed", String(button.dataset.template === paperDraft.background));
+    const context = button.firstElementChild.getContext("2d");
+    context.save();
+    context.scale(210 / paper.w, 297 / paper.h);
+    paintPaper(context, { x: 0, y: 0, w: paper.w, h: paper.h }, false,
+      button.dataset.template, paperDraft.color);
+    context.restore();
+  }
+}
+
+function renderPaperGallery() {
+  const grid = $("paperPageGrid");
+  grid.replaceChildren();
+  const pdfPages = pdfDocumentPages();
+  const count = pdfPages.length || paperPageCount;
+  const current = Number($("pageStatus").textContent.match(/\d+/)?.[0]) - 1;
+  const observer = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const index = Number(entry.target.dataset.page);
+      const page = pdfPages.length ? pdfPages[index] : paperPage(index);
+      const preview = entry.target.querySelector("canvas");
+      const context = preview.getContext("2d");
+      context.scale(preview.width / page.w, preview.height / page.h);
+      context.translate(-page.x, -page.y);
+      paintPaper(context, page);
+      context.beginPath();
+      context.rect(page.x, page.y, page.w, page.h);
+      context.clip();
+      for (const object of objects) {
+        const box = bounds(object);
+        if (box.y + box.h + 24 >= page.y && box.y - 24 <= page.y + page.h) paintObject(context, object);
+      }
+      observer.unobserve(entry.target);
+    }
+  }, { root: $("paperPagesPanel"), rootMargin: "160px" });
+  // Disconnect when the dialog closes or the gallery is rebuilt.
+  paperGalleryObserver?.disconnect();
+  paperGalleryObserver = observer;
+  for (let index = 0; index < count; index++) {
+    const page = pdfPages.length ? pdfPages[index] : paperPage(index);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "paper-page-card";
+    button.dataset.page = String(index);
+    button.setAttribute("aria-label", `Chuyển đến trang ${index + 1}`);
+    if (index === current) button.setAttribute("aria-current", "page");
+    const preview = document.createElement("canvas");
+    preview.width = 180;
+    preview.height = Math.round(180 * page.h / page.w);
+    preview.setAttribute("aria-hidden", "true");
+    preview.style.background = page.pdfBackground ? "#fff" : paperColor;
+    const label = document.createElement("strong");
+    label.textContent = `Trang ${index + 1}`;
+    button.append(preview, label);
+    button.onclick = () => {
+      view.y = 60 - page.y * view.z;
+      $("paperDialog").close();
+      draw();
+      saveLesson();
+    };
+    grid.append(button);
+    observer.observe(button);
+  }
+  $("galleryAddPage").hidden = Boolean(pdfPages.length);
+}
+let paperGalleryObserver = null;
+
+function selectPaperTab(pages) {
+  $("paperTemplatesPanel").hidden = pages;
+  $("paperPagesPanel").hidden = !pages;
+  $("paperTemplatesTab").setAttribute("aria-selected", String(!pages));
+  $("paperPagesTab").setAttribute("aria-selected", String(pages));
+  $("paperTemplatesTab").tabIndex = pages ? -1 : 0;
+  $("paperPagesTab").tabIndex = pages ? 0 : -1;
+  $("applyPaperSettings").hidden = pages;
+  $("cancelPaperSettings").textContent = pages ? "Đóng" : "Hủy";
+  if (pages) renderPaperGallery();
+}
+$("paperSettingsBtn").onclick = () => {
+  paperDraft = { background: paperBackground, color: paperColor };
+  $("paperCustomColor").value = paperColor;
+  $("paperColorPreset").value = [...$("paperColorPreset").options].some(option => option.value === paperColor)
+    ? paperColor : "custom";
+  renderPaperTemplates();
+  selectPaperTab(Boolean(pdfDocumentPages().length));
+  $("paperTemplatesTab").disabled = Boolean(pdfDocumentPages().length);
+  $("paperDialog").showModal();
+};
+$("paperTemplatesTab").onclick = () => selectPaperTab(false);
+$("paperPagesTab").onclick = () => selectPaperTab(true);
+document.querySelector(".paper-tabs").onkeydown = event => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  if ($("paperTemplatesTab").disabled) return;
+  const pages = event.key === "End" || (event.key !== "Home" && $("paperPagesPanel").hidden);
+  selectPaperTab(pages);
+  $(pages ? "paperPagesTab" : "paperTemplatesTab").focus();
+};
+$("paperColorPreset").onchange = event => {
+  if (event.target.value === "custom") { $("paperCustomColor").focus(); return; }
+  paperDraft.color = event.target.value;
+  $("paperCustomColor").value = paperDraft.color;
+  renderPaperTemplates();
+};
+$("paperCustomColor").oninput = event => {
+  paperDraft.color = event.target.value;
+  $("paperColorPreset").value = "custom";
+  renderPaperTemplates();
+};
+$("applyPaperSettings").onclick = () => {
+  if (paperDraft.background !== paperBackground || paperDraft.color !== paperColor) {
     snapshot();
-
-    objects = [];
-    selected = -1;
-    selection = null;
-
+    paperBackground = paperDraft.background;
+    paperColor = paperDraft.color;
     changed();
   }
+  $("paperDialog").close();
+};
+$("closePaperDialog").onclick = $("cancelPaperSettings").onclick = () => $("paperDialog").close();
+$("paperDialog").onclose = () => { paperGalleryObserver?.disconnect(); paperDraft = null; };
+$("galleryAddPage").onclick = () => { $("addPageBtn").click(); renderPaperGallery(); };
+
+function clearBoardInteraction() {
+  clearGroupSelection();
+  selected = -1;
+  selection = null;
+  active = null;
+  start = null;
+  dragging = false;
+  resizeHandle = null;
+  eraserCursor = null;
+  $("selectionNote").hidden = true;
+  window.boardAI?.clearRegion();
+}
+
+$("clearBtn").onclick = () => {
+  if (!objects.length && paperPageCount === 1) return;
+  if (!confirm("Xóa tất cả nét viết, ảnh và tài liệu trên bảng? Bạn có thể nhấn Hoàn tác để khôi phục.")) return;
+  snapshot();
+  fileImportRevision++;
+  objects = [];
+  paperPageCount = 1;
+  view = { x: 0, y: 0, z: 1, fit: true };
+  images.clear();
+  clearBoardInteraction();
+  changed();
+  toast("Đã xóa tất cả. Bảng trở về một trang A4 trống.");
+};
+
+$("clearInkBtn").onclick = () => {
+  if (!objects.some(isInkObject)) return;
+  snapshot();
+  objects = objects.filter(object => !isInkObject(object));
+  clearBoardInteraction();
+  changed();
+  toast("Đã xóa toàn bộ nét viết và nét tô sáng. Ảnh và tài liệu được giữ nguyên.");
+};
+
+$("removeFilesBtn").onclick = () => {
+  if (!objects.some(isUploadedObject)) return;
+  snapshot();
+  fileImportRevision++;
+  objects = objects.filter(object => !isUploadedObject(object));
+  images.clear();
+  paperPageCount = contentPageCount();
+  view = { x: 0, y: 0, z: 1, fit: true };
+  clearBoardInteraction();
+  changed();
+  toast("Đã gỡ toàn bộ ảnh và file khỏi bảng. Ctrl + Z để hoàn tác.");
 };
 
 // =====================================================
@@ -3547,12 +4333,15 @@ function insertImageFile(file) {
     return;
   }
 
+  const importRevision = fileImportRevision;
   const reader = new FileReader();
 
   reader.onload = () => {
+    if (importRevision !== fileImportRevision) return;
     const image = new Image();
 
     image.onload = () => {
+      if (importRevision !== fileImportRevision) return;
       const scale = Math.min(
         1,
         1200 / image.width,
@@ -3614,6 +4403,10 @@ function insertImageFile(file) {
 }
 
 function insertDocumentFile(file) {
+  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    window.boardPDF.open(file);
+    return;
+  }
   const point = world({
     x: boardW * 0.3,
     y: boardH * 0.2,
@@ -3645,8 +4438,9 @@ $("imageInput").onchange = (event) => {
   const isImage = file.type.startsWith("image/");
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 
-  if (file.size > 8 * 1024 * 1024 && (isImage || isPdf)) {
-    toast("Chọn file nhỏ hơn 8 MB.");
+  const fileLimitMB = isPdf ? 50 : 8;
+  if (file.size > fileLimitMB * 1024 * 1024 && (isImage || isPdf)) {
+    toast(`Chọn ${isPdf ? "PDF" : "ảnh"} không quá ${fileLimitMB} MB.`);
     event.target.value = "";
     return;
   }
@@ -3730,27 +4524,63 @@ function download(data, name) {
   link.remove();
 }
 
-$("exportBtn").onclick = () => {
+async function prepareLessonImages(items) {
+  for (const item of items) {
+    if (item.type !== "image") continue;
+    let image = images.get(item.src);
+    if (!image) { image = new Image(); image.src = item.src; images.set(item.src, image); }
+    await image.decode();
+  }
+}
+
+function renderPaperPage(page, items = objects, background = paperBackground,
+  surfaceColor = paperColor) {
   const output = document.createElement("canvas");
-
-  output.width = canvas.width;
-  output.height = canvas.height;
-
+  const scale = Math.min(2, 4096 / Math.max(page.w, page.h));
+  output.width = Math.ceil(page.w * scale);
+  output.height = Math.ceil(page.h * scale);
   const context = output.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
+  context.scale(output.width / page.w, output.height / page.h);
+  context.translate(-page.x, -page.y);
+  paintPaper(context, page, false, background, surfaceColor);
+  context.beginPath();
+  context.rect(page.x, page.y, page.w, page.h);
+  context.clip();
+  items.forEach(item => {
+    const box = bounds(item);
+    const padding = (item.width || 0) * 6;
+    if (box.y + box.h + padding >= page.y && box.y - padding <= page.y + page.h
+      && box.x + box.w + padding >= page.x && box.x - padding <= page.x + page.w) {
+      paintObject(context, item);
+    }
+  });
+  return output;
+}
 
-  context.fillStyle = "white";
-  context.fillRect(0, 0, output.width, output.height);
-
-  context.scale(dpr, dpr);
-  context.translate(view.x, view.y);
-  context.scale(view.z, view.z);
-
-  objects.forEach((object) => paintObject(context, object));
-
-  download(output.toDataURL("image/png"), "bang-trang.png");
-
-  toast("Đã xuất ảnh vùng bảng đang xem.");
+$("exportBtn").onclick = async () => {
+  const button = $("exportBtn");
+  if (button.disabled) return;
+  button.disabled = true;
+  const items = JSON.parse(JSON.stringify(objects));
+  const background = paperBackground;
+  const surfaceColor = paperColor;
+  const pdfPages = items.filter(item => item.pdfBackground);
+  const centerY = (boardH / 2 - view.y) / view.z;
+  const index = pdfPages.length
+    ? Math.max(0, pdfPages.findIndex(page => page.y + page.h > centerY))
+    : Math.max(0, Math.min(paperPageCount - 1,
+      Math.floor((centerY - paper.top) / (paper.h + paper.gap))));
+  const page = pdfPages.length ? pdfPages[index] : paperPage(index);
+  try {
+    await prepareLessonImages(items);
+    const output = renderPaperPage(page, items, background, surfaceColor);
+    download(output.toDataURL("image/png"), `bai-giang-trang-${index + 1}.png`);
+    toast(`Đã xuất ảnh toàn bộ trang ${index + 1}.`);
+  } catch (error) {
+    toast(`Không xuất được ảnh: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
 };
 
 function buildLessonPDF(pages) {
@@ -3775,7 +4605,9 @@ function buildLessonPDF(pages) {
   pages.forEach((page, i) => {
     const id = 3 + i * 3;
     const jpeg = Uint8Array.from(atob(page.data.split(",")[1]), character => character.charCodeAt(0));
-    const content = encoder.encode("q\n595.28 0 0 841.89 0 0 cm\n/Board Do\nQ\n");
+    const scale = Math.min(595.28 / page.width, 841.89 / page.height);
+    const width = page.width * scale, height = page.height * scale;
+    const content = encoder.encode(`q\n${width} 0 0 ${height} ${(595.28 - width) / 2} ${(841.89 - height) / 2} cm\n/Board Do\nQ\n`);
     object(id, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Board ${id + 1} 0 R >> >> /Contents ${id + 2} 0 R >>`);
     object(id + 1, `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`, jpeg);
     object(id + 2, `<< /Length ${content.length} >>`, content);
@@ -3789,34 +4621,19 @@ function buildLessonPDF(pages) {
 
 async function exportLessonPDF() {
   const lessonObjects = JSON.parse(JSON.stringify(objects));
-  if (!lessonObjects.length) throw new Error("Bảng chưa có nội dung để lưu PDF.");
-  for (const item of lessonObjects) {
-    if (item.type !== "image") continue;
-    let image = images.get(item.src);
-    if (!image) { image = new Image(); image.src = item.src; images.set(item.src, image); }
-    await image.decode();
-  }
-  const boxes = lessonObjects.map(bounds);
-  const left = Math.min(...boxes.map(box => box.x)) - 24;
-  const top = Math.min(...boxes.map(box => box.y)) - 24;
-  const right = Math.max(...boxes.map(box => box.x + box.w)) + 24;
-  const bottom = Math.max(...boxes.map(box => box.y + box.h)) + 24;
-  const pageWidth = Math.max(800, right - left);
-  const pageHeight = pageWidth * 841.89 / 595.28;
-  const scale = Math.min(2, 4096 / pageWidth);
-  const count = Math.ceil((bottom - top) / pageHeight);
+  const background = paperBackground;
+  const surfaceColor = paperColor;
+  if (!lessonObjects.length) throw new Error("Tài liệu chưa có nội dung để lưu PDF.");
+  const pdfPages = lessonObjects.filter(item => item.pdfBackground);
+  // Ignore trailing blank pages created while scrolling. Preserve blank pages between content.
+  const count = pdfPages.length || contentPageCount(lessonObjects);
+  await prepareLessonImages(lessonObjects);
   const pages = [];
   for (let index = 0; index < count; index++) {
-    const output = document.createElement("canvas");
-    output.width = Math.ceil(pageWidth * scale);
-    output.height = Math.ceil(pageHeight * scale);
-    const context = output.getContext("2d");
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, output.width, output.height);
-    context.scale(output.width / pageWidth, output.height / pageHeight);
-    context.translate(-left, -top - index * pageHeight);
-    lessonObjects.forEach(item => paintObject(context, item));
+    const page = pdfPages.length ? pdfPages[index] : paperPage(index);
+    const output = renderPaperPage(page, lessonObjects, background, surfaceColor);
     pages.push({ data: output.toDataURL("image/jpeg", 0.95), width: output.width, height: output.height });
+    output.width = output.height = 0;
     await new Promise(resolve => requestAnimationFrame(resolve));
   }
   return buildLessonPDF(pages);
@@ -3945,6 +4762,17 @@ function validateDoc(data) {
       }
     }
 
+    for (const key of ["clipRegions", "cutouts"]) {
+      if (object[key] !== undefined && (!Array.isArray(object[key]) || object[key].length > 1000
+          || object[key].some(region => !Array.isArray(region) || region.length < 3 || region.length > 100000
+            || region.some(point => !point || !Number.isFinite(point.x) || !Number.isFinite(point.y))))) {
+        throw new Error("Vùng cắt không hợp lệ.");
+      }
+    }
+    if (object.freePosition !== undefined && typeof object.freePosition !== "boolean") {
+      throw new Error("Vị trí vùng cắt không hợp lệ.");
+    }
+
     if (
       ["pen", "highlight"].includes(object.type) &&
       !object.points?.length
@@ -4010,7 +4838,12 @@ function validateDoc(data) {
 }
 
 function applyDoc(data) {
+  fileImportRevision++;
   objects = data.objects;
+  paperPageCount = Number.isSafeInteger(data.paper?.pages) && data.paper.pages > 0
+    ? data.paper.pages : 1;
+  paperColor = typeof data.paper?.color === "string" && /^#[0-9a-f]{6}$/i.test(data.paper.color)
+    ? data.paper.color : "#faf8e8";
 
   for (const object of objects) {
     if (object.type === "protractor") {
@@ -4064,20 +4897,22 @@ function applyDoc(data) {
   if (
     data.view &&
     [data.view.x, data.view.y, data.view.z].every(Number.isFinite) &&
-    data.view.z >= 0.2 &&
+    data.view.z >= 0.1 &&
     data.view.z <= 4
   ) {
-    view = { x: data.view.x, y: data.view.y, z: 1 };
+    view = { x: data.view.x, y: data.view.y, z: data.view.z, fit: data.view.fit !== false };
   }
 
-  if (["dots", "grid", "lined", "plain"].includes(data.background)) {
-    $("background").value = data.background;
+  if (paperTemplates.some(template => template.id === data.background)) {
+    paperBackground = data.background;
   }
 
   if (["light", "dark"].includes(data.theme)) {
     applyTheme(data.theme);
   }
 
+  if (data.paper?.format !== "a4") migrateLegacyPaper();
+  clearGroupSelection();
   selected = -1;
   selection = null;
 }
@@ -4123,13 +4958,17 @@ $("importInput").onchange = async (event) => {
 function applyTheme(theme) {
   const value = theme === "dark" ? "dark" : "light";
   document.body.dataset.theme = value;
-  $("themeMode").value = value;
+  const light = value === "light";
+  $("themeToggle").setAttribute("aria-checked", String(light));
+  $("themeToggle").title = light
+    ? "Tắt đèn · Chuyển sang giao diện tối"
+    : "Bật đèn · Chuyển sang giao diện sáng";
   draw();
   saveLesson();
 }
 
-$("themeMode").onchange = (event) => {
-  applyTheme(event.target.value);
+$("themeToggle").onclick = () => {
+  applyTheme(document.body.dataset.theme === "dark" ? "light" : "dark");
 };
 
 document.querySelectorAll("[data-tab]").forEach((button) => {
@@ -4268,6 +5107,7 @@ $("exampleBtn").onclick = () => {
 window.addEventListener("keydown", (event) => {
   if (
     /INPUT|TEXTAREA|SELECT/.test(event.target.tagName) ||
+    (event.target.closest("#themeToggle") && ["Space", "Enter"].includes(event.code)) ||
     document.querySelector("dialog[open]")
   ) {
     return;
@@ -4308,6 +5148,10 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "Escape") {
+    if (start?.groupMove) finishGroupMove(true);
+    if (tool === "moveLasso") { dragging = false; start = null; }
+    clearGroupSelection();
+    if (tool === "moveLasso") canvas.style.cursor = "crosshair";
     selection = null;
     selected = -1;
 
@@ -4345,7 +5189,7 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => {
   if (event.code === "Space") {
     space = false;
-    chooseTool(tool);
+    chooseTool(tool, { preserveSelection: true, preserveLassoMode: true });
   }
 });
 
@@ -4359,55 +5203,43 @@ window.addEventListener("blur", () => {
 
 async function initializeLesson() {
   let loaded = false;
-
+  let resumeSession = false;
   try {
-    const response = await fetch("/api/lesson", { cache: "no-store" });
-    if (response.ok) {
-      const data = validateDoc(await response.json());
-      restoringLesson = true;
-      applyDoc(data);
-      loaded = true;
-    } else if (response.status !== 404) {
-      throw new Error("Không thể tải bài giảng từ máy chủ.");
-    }
-  } catch {
-    // Fall back to the local cache when the server is unavailable.
-  } finally {
-    restoringLesson = false;
-  }
-
-  if (!loaded) {
-    try {
-      const saved = localStorage.getItem("bangtrang-v1");
-      if (saved) {
+    resumeSession = sessionStorage.getItem("qh-board-started") === boardSessionId;
+    const cached = sessionStorage.getItem(sessionLessonKey);
+    if (resumeSession && cached) {
+      const data = validateDoc(JSON.parse(cached));
+      if (data.sessionId === boardSessionId) {
         restoringLesson = true;
-        applyDoc(validateDoc(JSON.parse(saved)));
+        applyDoc(data);
         loaded = true;
       }
-    } catch {
-      toast("Không đọc được bản lưu cũ. Bạn vẫn có thể mở tệp JSON.");
-    } finally {
-      restoringLesson = false;
     }
+  } catch { /* Try the server copy belonging to this login session. */ }
+  finally { restoringLesson = false; }
+
+  if (resumeSession && !loaded) {
+    try {
+      const response = await fetch("/api/lesson", { cache: "no-store" });
+      if (response.ok) {
+        const data = validateDoc(await response.json());
+        // A new login must never restore a previous login's shared server lesson.
+        if (data.sessionId === boardSessionId) {
+          restoringLesson = true;
+          applyDoc(data);
+          loaded = true;
+        }
+      }
+    } catch { /* Start blank if this session has no usable saved copy. */ }
+    finally { restoringLesson = false; }
   }
 
   resize();
-
-  const viewportCenter = { x: boardW / 2, y: boardH / 2 };
-  const worldCenter = world(viewportCenter);
-  view = {
-    x: viewportCenter.x - worldCenter.x * view.z,
-    y: viewportCenter.y - worldCenter.y * view.z,
-    z: view.z,
-  };
   draw();
-
-  if (loaded) {
-    $("saveStatus").textContent = "Đã tải bài giảng từ máy chủ hoặc bản dự phòng";
-    saveLesson();
-  } else {
-    saveLesson();
-  }
+  $("saveStatus").textContent = loaded
+    ? "Đã khôi phục bảng trong phiên đăng nhập này"
+    : "Phiên đăng nhập mới · Bảng trống";
+  saveLesson();
 }
 
 initializeLesson();

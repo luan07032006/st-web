@@ -9,7 +9,7 @@
     <meta name="description" content="Không gian bảng trắng tương tác cho giảng dạy: vẽ, viết, hình học và đồ thị.">
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23245bea'/%3E%3Cpath d='M9 8h9q8 0 4 8 5 8-4 8H9z' fill='white'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="./css/style.css">
+    <link rel="stylesheet" href="./css/style.css?v=lamp-theme-toggle">
 </head>
 
 <body class="sidebar-collapsed">
@@ -25,18 +25,23 @@
         </div><button id="focusBtn">⛶ <span>Toàn màn hình</span></button>
     </nav>
     <main>
-        <section class="workspace" id="workspace" aria-label="Bảng trắng"><canvas id="board"
+        <section class="workspace" id="workspace" aria-label="Tài liệu giấy A4"><canvas id="board"
                 aria-label="Bảng vẽ tương tác"></canvas>
             <div class="board-scrollbar" id="boardScroll" role="scrollbar" tabindex="0"
-                aria-label="Cuộn bảng theo chiều dọc" aria-controls="board" aria-orientation="vertical"
-                aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                aria-label="Cuộn các trang giấy" aria-controls="board" aria-orientation="vertical"
+                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <div class="board-scroll-track"><div class="board-scroll-thumb" id="boardScrollThumb"></div></div>
             </div>
-            <div class="board-label"><span class="tiny-square"></span> BẢNG CHÍNH <span id="objectCount">0 đối
+            <div class="board-label"><span class="tiny-square"></span> GIẤY A4 <span id="objectCount">0 đối
                     tượng</span></div>
+            <div class="paper-controls" aria-label="Các trang tài liệu">
+                <span id="pageStatus" aria-live="polite">Trang 1 / 1</span>
+                <button type="button" id="paperSettingsBtn" aria-haspopup="dialog" title="Chọn kiểu giấy, màu giấy và xem các trang">▦ Giấy &amp; trang</button>
+                <button type="button" id="addPageBtn" title="Thêm trang A4 ở cuối tài liệu">＋ Thêm trang</button>
+            </div>
             <div class="welcome" id="welcome"><span class="welcome-icon">✎</span>
-                <h1>Ý tưởng của bạn,<br>không giới hạn.</h1>
-                <p>Chọn một công cụ và bắt đầu bài giảng của bạn.</p>
+                <h1>Bài giảng của bạn,<br>trên từng trang giấy.</h1>
+                <p>Viết đến sát mép giấy. Ctrl + cuộn chuột để phóng to nhẹ nhàng.</p>
                 <div><kbd>B</kbd> Bút vẽ <span>·</span> <kbd>Space</kbd> Di chuyển bảng</div><button id="exampleBtn">Thử
                     bài giảng mẫu <span>↗</span></button>
             </div>
@@ -44,38 +49,64 @@
                 <div class="tool-handle" id="toolHandle" title="Kéo để di chuyển thanh công cụ">⠿</div>
                 <div id="toolButtons"></div>
                 <div class="tool-separator"></div><button id="imageBtn" title="Chèn ảnh hoặc tài liệu"
-                    aria-label="Chèn ảnh hoặc tài liệu">▧</button><button id="collapseTools" title="Thu gọn thanh công cụ"
+                    aria-label="Chèn ảnh hoặc tài liệu">▧</button>
+                <div class="board-actions" role="group" aria-label="Dọn nội dung bảng">
+                    <button type="button" id="clearInkBtn" aria-label="Xóa nét viết" title="Xóa nét viết và tô sáng trên tất cả các trang">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 14 8-9a2 2 0 0 1 3 0l5 5-9 10H6zM7 10l7 7M14 20h7"/></svg><span class="action-label">Nét</span>
+                    </button>
+                    <button type="button" id="removeFilesBtn" aria-label="Gỡ ảnh / file" title="Gỡ toàn bộ ảnh và các trang tài liệu đã tải lên">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H5v18h14V9zM13 3v6h6M9 13l6 5M15 13l-6 5"/></svg><span class="action-label">File</span>
+                    </button>
+                    <button type="button" id="clearBtn" aria-label="Xóa tất cả" title="Xóa tất cả nội dung, ảnh, tài liệu và các trang">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg><span class="action-label">Tất cả</span>
+                    </button>
+                </div>
+                <button id="collapseTools" title="Thu gọn thanh công cụ"
                     aria-label="Thu gọn thanh công cụ">‹</button>
             </div>
             <div class="eraser-options" id="eraserOptions" role="group" aria-label="Chế độ tẩy" hidden>
                 <button type="button" data-eraser-mode="stroke" aria-pressed="true">Tẩy nét</button>
                 <button type="button" data-eraser-mode="object" aria-pressed="false">Tẩy đối tượng</button>
             </div>
-            <div class="pen-options"><span class="option-title">MÀU NÉT</span>
-                <div id="colors"></div><input id="customColor" type="color" value="#245bea"
-                    aria-label="Màu tùy chọn"><span class="vertical-line"></span><input id="strokeWidth" type="range"
-                    min="1" max="20" value="3" aria-label="Độ dày nét"><span id="widthValue">3 px</span>
+            <div class="eraser-options lasso-options" id="lassoOptions" role="group" aria-label="Kiểu khoanh vùng di chuyển" hidden>
+                <button type="button" data-lasso-mode="freeform" aria-pressed="true" title="Giữ chuột hoặc bút và tự vẽ đường khoanh quanh nội dung">⌁ Lasso tự do · Tự khoanh</button>
+                <button type="button" data-lasso-mode="rectangle" aria-pressed="false">▢ Vùng chữ nhật</button>
             </div>
             <div class="board-bottom">
                 <div class="history"><button id="undoBtn" aria-label="Hoàn tác"
                         title="Hoàn tác (Ctrl Z)">↶</button><button id="redoBtn" aria-label="Làm lại"
-                        title="Làm lại (Ctrl Shift Z)">↷</button><span></span><button id="clearBtn"
-                        aria-label="Xóa bảng" title="Xóa toàn bộ bảng">♲</button></div>
-                <div class="zoom"><button id="resetView"
-                        title="Tỷ lệ cố định 100% · Nhấn để về đầu bảng">100%</button><span></span><select id="themeMode" aria-label="Chế độ giao diện">
-                        <option value="light">Giao diện sáng</option>
-                        <option value="dark">Giao diện tối</option>
-                    </select><select id="background" aria-label="Kiểu nền">
-                        <option value="dots">Nền chấm</option>
-                        <option value="grid">Ô vuông</option>
-                        <option value="lined">Giấy kẻ ngang</option>
-                        <option value="plain">Nền trắng</option>
-                    </select></div>
+                        title="Làm lại (Ctrl Shift Z)">↷</button></div>
+                <div class="zoom"><button type="button" id="zoomOut" aria-label="Thu nhỏ giấy" title="Thu nhỏ giấy">−</button><button id="resetView"
+                        title="Vừa chiều rộng giấy · Nhấn để về trang đầu">100%</button><button type="button" id="zoomIn" aria-label="Phóng to giấy" title="Phóng to giấy">+</button><span class="zoom-divider" aria-hidden="true"></span>
+                    <button type="button" id="themeToggle" role="switch" aria-checked="true" aria-label="Bật giao diện sáng" title="Tắt đèn · Chuyển sang giao diện tối">
+                        <svg class="theme-lamp" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <path class="lamp-bulb" d="M8.5 15.5c0-1.7-2.5-3-2.5-6a6 6 0 0 1 12 0c0 3-2.5 4.3-2.5 6Z" />
+                            <path d="M9 18h6m-5 3h4m-2-5.5V12m-2-2 2 2 2-2" />
+                            <path class="lamp-rays" d="M12 1V0M3 3l1 1M1 9h1m20 0h1m-3-6 1-1" />
+                        </svg>
+                        <span class="theme-switch-track" aria-hidden="true"></span>
+                    </button>
+                </div>
             </div>
-            <div class="selection-note" id="selectionNote" hidden>Đã chọn vùng trên bảng.
+            <div class="selection-note" id="selectionNote" role="status" hidden>Đã chọn vùng trên bảng.
             </div>
         </section>
         <aside id="sidebar">
+            <details class="pen-settings">
+                <summary>Màu nét &amp; độ dày</summary>
+            <div class="pen-options"><span class="option-title">MÀU NÉT</span>
+                <div id="colors"></div><input id="customColor" type="color" value="#245bea"
+                    aria-label="Màu tùy chọn"><span class="vertical-line"></span><div class="stroke-width-control"><button type="button" id="decreaseStrokeWidth" aria-label="Giảm độ dày nét" title="Giảm độ dày nét">−</button><input id="strokeWidth" type="range"
+                    min="1" max="20" value="2" aria-label="Độ dày nét"><button type="button" id="increaseStrokeWidth" aria-label="Tăng độ dày nét" title="Tăng độ dày nét">+</button><span id="widthValue" aria-live="polite">2 px</span></div>
+                <label for="handwritingScale">Tỷ lệ chữ viết</label>
+                <select id="handwritingScale" title="Thu nhỏ từng nét quanh điểm bắt đầu đặt bút; chọn 100% để nét bám sát con trỏ suốt lúc viết.">
+                    <option value="40">40%</option><option value="50">50%</option>
+                    <option value="60">60%</option><option value="70" selected>70%</option>
+                    <option value="80">80%</option><option value="90">90%</option>
+                    <option value="100">100%</option>
+                </select>
+            </div>
+            </details>
             <div class="panel-tabs"><button class="active" data-tab="math">∿ Toán học</button><button data-tab="ai">✧
                     Trợ lý AI</button></div>
             <div class="panel-content" id="mathPanel">
@@ -181,8 +212,45 @@ x + y <= 4</textarea></div>
                     value="default">Chèn lên bảng</button></div>
         </form>
     </dialog>
-    <script src="./js/app.js"></script>
-    <script src="./js/ai-chat.js"></script>
+    <dialog id="paperDialog" aria-labelledby="paperDialogTitle">
+        <div class="dialog-head">
+            <h2 id="paperDialogTitle">Giấy &amp; trang</h2>
+            <button type="button" id="closePaperDialog" aria-label="Đóng bảng chọn giấy">×</button>
+        </div>
+        <div class="paper-tabs" role="tablist" aria-label="Cài đặt giấy">
+            <button type="button" id="paperTemplatesTab" role="tab" aria-selected="true" aria-controls="paperTemplatesPanel">Kiểu giấy</button>
+            <button type="button" id="paperPagesTab" role="tab" aria-selected="false" aria-controls="paperPagesPanel" tabindex="-1">Các trang</button>
+        </div>
+        <section id="paperTemplatesPanel" role="tabpanel" aria-labelledby="paperTemplatesTab">
+            <div class="paper-options">
+                <span class="paper-format">A4 · 210 × 297 mm</span>
+                <label for="paperColorPreset">Màu giấy</label>
+                <select id="paperColorPreset">
+                    <option value="#faf8e8">Vàng kem</option>
+                    <option value="#ffffff">Trắng</option>
+                    <option value="#252a32">Tối</option>
+                    <option value="#eef5ed">Xanh nhạt</option>
+                    <option value="#fceef1">Hồng nhạt</option>
+                    <option value="custom">Tùy chỉnh</option>
+                </select>
+                <input type="color" id="paperCustomColor" value="#faf8e8" aria-label="Màu giấy tùy chỉnh">
+            </div>
+            <p class="paper-hint">Chọn mẫu bên dưới. Kiểu và màu giấy áp dụng cho tất cả trang A4.</p>
+            <div id="paperTemplateGrid" class="paper-template-grid" role="group" aria-label="Các mẫu giấy"></div>
+        </section>
+        <section id="paperPagesPanel" role="tabpanel" aria-labelledby="paperPagesTab" hidden>
+            <p class="paper-hint">Chọn một trang để chuyển đến và tiếp tục viết.</p>
+            <div id="paperPageGrid" class="paper-page-grid"></div>
+            <button type="button" id="galleryAddPage">＋ Thêm trang A4</button>
+        </section>
+        <div class="dialog-actions paper-dialog-actions">
+            <button type="button" id="cancelPaperSettings">Hủy</button>
+            <button type="button" id="applyPaperSettings" class="primary">Áp dụng</button>
+        </div>
+    </dialog>
+    <script src="./js/app.js?v=lasso-freehand"></script>
+    <script src="./js/pdf-import.js?v=paper-gallery"></script>
+    <script src="./js/ai-chat.js?v=toolbar-peach"></script>
 </body>
 
 </html>
