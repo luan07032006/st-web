@@ -88,7 +88,7 @@
       snapshot();
       fileImportRevision++;
       objects = pages;
-      view = { x: 0, y: 0, z: 1, fit: true };
+      view = { x: 0, y: 0, z: 1, fit: false };
       selected = -1;
       selection = null;
       changed();

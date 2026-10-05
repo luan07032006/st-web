@@ -9,7 +9,7 @@
     <meta name="description" content="Không gian bảng trắng tương tác cho giảng dạy: vẽ, viết, hình học và đồ thị.">
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23245bea'/%3E%3Cpath d='M9 8h9q8 0 4 8 5 8-4 8H9z' fill='white'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="./css/style.css?v=lamp-theme-toggle">
+    <link rel="stylesheet" href="./css/style.css?v=rounded-handwriting">
 </head>
 
 <body class="sidebar-collapsed">
@@ -41,7 +41,7 @@
             </div>
             <div class="welcome" id="welcome"><span class="welcome-icon">✎</span>
                 <h1>Bài giảng của bạn,<br>trên từng trang giấy.</h1>
-                <p>Viết đến sát mép giấy. Ctrl + cuộn chuột để phóng to nhẹ nhàng.</p>
+                <p>Viết tự nhiên trên giấy. Cuộn chuột để chuyển giữa các trang.</p>
                 <div><kbd>B</kbd> Bút vẽ <span>·</span> <kbd>Space</kbd> Di chuyển bảng</div><button id="exampleBtn">Thử
                     bài giảng mẫu <span>↗</span></button>
             </div>
@@ -76,8 +76,10 @@
                 <div class="history"><button id="undoBtn" aria-label="Hoàn tác"
                         title="Hoàn tác (Ctrl Z)">↶</button><button id="redoBtn" aria-label="Làm lại"
                         title="Làm lại (Ctrl Shift Z)">↷</button></div>
-                <div class="zoom"><button type="button" id="zoomOut" aria-label="Thu nhỏ giấy" title="Thu nhỏ giấy">−</button><button id="resetView"
-                        title="Vừa chiều rộng giấy · Nhấn để về trang đầu">100%</button><button type="button" id="zoomIn" aria-label="Phóng to giấy" title="Phóng to giấy">+</button><span class="zoom-divider" aria-hidden="true"></span>
+                <div class="zoom">
+                    <button type="button" id="zoomOut" aria-label="Thu nhỏ giấy" title="Thu nhỏ 10%">−</button>
+                    <output id="zoomPercent" aria-live="polite">100%</output>
+                    <button type="button" id="zoomIn" aria-label="Phóng to giấy" title="Phóng to 10%">＋</button>
                     <button type="button" id="themeToggle" role="switch" aria-checked="true" aria-label="Bật giao diện sáng" title="Tắt đèn · Chuyển sang giao diện tối">
                         <svg class="theme-lamp" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                             <path class="lamp-bulb" d="M8.5 15.5c0-1.7-2.5-3-2.5-6a6 6 0 0 1 12 0c0 3-2.5 4.3-2.5 6Z" />
@@ -93,19 +95,12 @@
         </section>
         <aside id="sidebar">
             <details class="pen-settings">
-                <summary>Màu nét &amp; độ dày</summary>
-            <div class="pen-options"><span class="option-title">MÀU NÉT</span>
-                <div id="colors"></div><input id="customColor" type="color" value="#245bea"
-                    aria-label="Màu tùy chọn"><span class="vertical-line"></span><div class="stroke-width-control"><button type="button" id="decreaseStrokeWidth" aria-label="Giảm độ dày nét" title="Giảm độ dày nét">−</button><input id="strokeWidth" type="range"
-                    min="1" max="20" value="2" aria-label="Độ dày nét"><button type="button" id="increaseStrokeWidth" aria-label="Tăng độ dày nét" title="Tăng độ dày nét">+</button><span id="widthValue" aria-live="polite">2 px</span></div>
-                <label for="handwritingScale">Tỷ lệ chữ viết</label>
-                <select id="handwritingScale" title="Thu nhỏ từng nét quanh điểm bắt đầu đặt bút; chọn 100% để nét bám sát con trỏ suốt lúc viết.">
-                    <option value="40">40%</option><option value="50">50%</option>
-                    <option value="60">60%</option><option value="70" selected>70%</option>
-                    <option value="80">80%</option><option value="90">90%</option>
-                    <option value="100">100%</option>
-                </select>
-            </div>
+                <summary>Bút viết · Màu nét</summary>
+                <div class="pen-options"><span class="option-title">MÀU NÉT</span>
+                    <div id="colors"></div><input id="customColor" type="color" value="#24304a"
+                        aria-label="Màu tùy chọn">
+                    <p class="ink-hint">Nét mảnh, đầu tròn · Tự làm mượt khi viết.</p>
+                </div>
             </details>
             <div class="panel-tabs"><button class="active" data-tab="math">∿ Toán học</button><button data-tab="ai">✧
                     Trợ lý AI</button></div>
@@ -248,7 +243,10 @@ x + y <= 4</textarea></div>
             <button type="button" id="applyPaperSettings" class="primary">Áp dụng</button>
         </div>
     </dialog>
-    <script src="./js/app.js?v=lasso-freehand"></script>
+    <script src="./js/vendor/perfect-freehand/index.js?v=1.2.3"></script>
+    <script src="./js/rope-ink.js?v=adaptive-ink-8"></script>
+    <script src="./js/ink-engine.js?v=adaptive-ink-8"></script>
+    <script src="./js/app.js?v=adaptive-ink-8"></script>
     <script src="./js/pdf-import.js?v=paper-gallery"></script>
     <script src="./js/ai-chat.js?v=toolbar-peach"></script>
 </body>

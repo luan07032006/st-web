@@ -83,11 +83,11 @@ ruled paper with a decorative margin. Select a paper color or use the custom
 color picker, then **Áp dụng** to update all A4 sheets. The **Các trang** tab
 shows thumbnails for navigation and adding pages; imported PDF pages keep their
 original appearance. Use **Thêm trang** or scroll toward the bottom to keep extending the
-document. Page count, paper appearance, and view are saved within the login session;
-undo/redo also restores page additions and paper settings. Zoom with **+ / −** (5% steps),
-**Ctrl/Cmd + wheel**, or a gentle two-finger pinch (10–400%). Drag with the hand tool
-or Space to pan; Shift + wheel scrolls horizontally. Click the percentage to fit the
-sheet width and return to the first page. Only visible sheets are painted on the viewport
+document. Page count, paper appearance, and position are saved within the login session;
+undo/redo also restores page additions and paper settings. Pages automatically fit
+the available width with at most 100% magnification. Scroll between pages; drag
+with the hand tool or Space to pan. Two-finger gestures pan without changing
+magnification, and Shift + wheel scrolls horizontally. Only visible sheets are painted on the viewport
 canvas. Opening an existing lesson without A4 metadata fits its contents into
 these pages while retaining all objects.
 
@@ -113,3 +113,93 @@ sheet). These actions support undo. Repeated scratch gestures remove only pen
 and highlight strokes; they never remove images, document pages, typed text or
 shapes. Both eraser modes also preserve uploaded assets. Use the explicit removal
 buttons to remove files. Clearing the board or files cancels pending insertions.
+
+New pen/highlighter strokes use `Frontend/js/rope-ink.js` and
+`Frontend/js/ink-engine.js` with the locally
+bundled MIT-licensed **perfect-freehand 1.2.3**. Its continuous stroke outlines
+are painted with quadratic curves on Canvas. Version 8 captures every confirmed
+sample in `rawPoints` (`x`, `y`, original pressure, tilt and timestamp), separately
+from the filtered vector `points`. Each display point links back through
+`rawIndex`. An adaptive One Euro position filter runs before fitting the elastic
+string to spatial guide pegs. It uses a 12 Hz minimum cutoff, beta 0.20 and an
+8 Hz derivative cutoff, tuned in CSS coordinates: slow writing suppresses tremor,
+while sustained faster motion raises the cutoff. A 0.9 CSS-pixel lag bound keeps
+acceleration responsive. Pressure and stroke width have separate temporal filters.
+The algorithm follows https://gery.casiez.net/1euro/.
+The automatic handwriting profile uses charcoal ink and a fine
+1.6 CSS-pixel nominal diameter, captured in document coordinates when a stroke
+begins. Width varies subtly with pressure, tilt and speed, within 0.86–1.14 times
+the base diameter. Mouse/touch use the same bounded profile without extra
+pressure simulation. Highlighters retain constant width and
+are filled once so joins/crossings do not accumulate opacity. Coalesced Pointer
+Events retain stylus samples; rendering is batched to animation frames with a
+cached background and cached completed paths. Palm events cannot interrupt a
+pen stroke, and cancelled strokes are discarded. Pressure/tilt require browser
+and stylus support.
+
+Open **Công cụ / AI → Màu nét** to choose a color. Width, stability, pressure,
+handwriting scale and zoom controls are removed. Old saved pen/scale preferences
+are no longer read. Coordinates use the page's existing scale, with no additional
+handwriting magnification, so separate strokes and Vietnamese accents stay aligned.
+
+The first pen-down guide is pinned. New filtered input creates guide pegs every
+0.75 CSS pixel along the traveled path, independently of event/frame frequency.
+A stronger local bending-energy fit relaxes the last 32 pegs, keeping ordinary
+displacement within 2 CSS pixels of their filtered attachments. Older pegs are locked as the pen
+moves on. An approximating quadratic B-spline wraps the string around the relaxed
+pegs with continuous tangents and rounded turns. Completed spans whose supporting
+pegs are locked stay fixed; only the recent tail is corrected. Every guide crossing
+is replayed in order, so batched input and restored vector samples produce the
+same fit. The first position remains exact; the tail follows the latest filtered
+nib position. Raw acquisition coordinates remain available in the saved stroke.
+
+Versions 7 and 8 also detect concentrated sharp turns over spatial supports rather
+than only between adjacent samples. Isolated peaks are replaced with circular
+fillets targeting a 2.2 CSS-pixel radius, with local corner displacement capped
+at 4 CSS pixels. Existing gradual curves and small closed loops keep the normal
+elastic fit. This provides a visible round apex instead of merely adding more
+samples to a tight corner. Corner supports and radii scale with the vector stroke.
+
+Pen strokes gently narrow over the first/last 3 CSS pixels to a
+minimum of 82% width, retaining round caps. Short accents and dots stay untapered,
+and highlighters retain their uniform width. Taper activates gradually as a stroke
+grows, with no separate reshaping pass on pen-up.
+
+Writing previews use `getPredictedEvents()` where available, with a conservative
+velocity fallback. Adaptive input also filters the forecast on a temporary copy
+of its state. Prediction requires steady motion, advances at most 2 CSS
+pixels, and expires after 32 ms. Stopping, sharp turns, long sampling gaps,
+pen-up and cancellation clear it. Forecasts copy confirmed pressure/tilt and add
+temporary guide pegs ahead of the real nib on a copy of the recent string. The
+temporary guides are replaced as real input arrives and never lock actual pegs,
+enter saved lessons,
+undo history or eraser/lasso geometry. Mouse and single-touch writing use the same
+short guide forecast; highlighters and pan gestures do not predict.
+The browser API follows https://www.w3.org/TR/pointerevents3/#predicted-events.
+
+Autosave stores both raw acquisition samples and filtered mathematical points,
+pressure, tilt, timestamps and the stroke's render settings with `inkVersion: 8`.
+Fitting, undo/redo, erasing, lasso cuts and AI captures use the same vector painter.
+Movement/scaling transform both point arrays; erasing slices the matching raw
+samples and rebases their links. A stationary pen-up is recorded in raw history
+while preserving the last displayed point to avoid a final hook. New pen-up
+movement passes through the same position filter. No whole-stroke smoothing is
+applied at pen-up. Canvas resizes and changing display DPR redraw vector paths at
+the current backing resolution, including display changes with unchanged CSS size.
+Every normal and live ink render also checks the backing size and rebuilds the
+background if needed, covering browsers that omit a resolution-change event.
+Earlier inkVersion 2/3/4/5/6/7 strokes retain their original painter. PNG and the
+existing PDF export remain raster.
+The implementation follows perfect-freehand's documented Canvas integration
+and publicly documented Goodnotes pen/stabilization behavior:
+https://github.com/steveruizok/perfect-freehand
+https://support.goodnotes.com/hc/en-us/articles/7353756785679-Write-and-customize-ink-with-the-Pen-tool
+https://www.goodnotes.com/blog/features-fixes-updates-march-2025
+
+Run `python tests/test_input_pipeline_browser.py` for raw capture, adaptive input,
+prediction, editing and DPR checks, `python tests/test_round_ink_browser.py`
+for sharp-corner and small-loop checks,
+`python tests/test_rope_browser.py` for the elastic-guide geometry checks,
+`python tests/test_ink_browser.py` for the ink input/rendering checks
+and `python tests/test_lasso_browser.py` for lasso regression checks. These use
+Python Playwright and Chrome with mocked HTTP requests and lesson saves.

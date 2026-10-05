@@ -25,7 +25,7 @@ let objects = [];
 let undoStack = [];
 let redoStack = [];
 
-let view = { x: 0, y: 0, z: 1, fit: true };
+let view = { x: 0, y: 0, z: 1, fit: false };
 // A4 at 96 dpi. Only visible pages are drawn; the canvas stays viewport-sized.
 const paper = { w: 794, h: 794 * 297 / 210, top: 60, gap: 28, margin: 0 };
 const paperTemplates = [
@@ -45,9 +45,13 @@ let paperGesture = null;
 
 let tool = "pen";
 let eraserMode = "stroke";
-let color = "#245bea";
-let width = 2;
-let handwritingScale = 0.7;
+let color = "#24304a";
+let width = 1.6;
+let inkFrame = 0;
+let inkPredictionTimer = 0;
+let inkBackdrop = null;
+let inkResolutionQuery = null;
+const inkSurface = document.createElement("canvas");
 
 let active = null;
 let start = null;
@@ -255,32 +259,6 @@ $("customColor").oninput = (event) => {
   setColor(event.target.value);
 };
 
-function updateStrokeWidth(value) {
-  const slider = $("strokeWidth");
-  width = Math.max(Number(slider.min), Math.min(Number(slider.max), Number(value)));
-  slider.value = String(width);
-  $("widthValue").textContent = `${width} px`;
-  $("decreaseStrokeWidth").disabled = width <= Number(slider.min);
-  $("increaseStrokeWidth").disabled = width >= Number(slider.max);
-}
-
-$("strokeWidth").oninput = (event) => updateStrokeWidth(event.target.value);
-$("decreaseStrokeWidth").onclick = () => updateStrokeWidth(width - 1);
-$("increaseStrokeWidth").onclick = () => updateStrokeWidth(width + 1);
-updateStrokeWidth($("strokeWidth").value);
-
-try {
-  const saved = Number(localStorage.getItem("bangtrang-handwriting-scale"));
-  if (saved >= 0.4 && saved <= 1) handwritingScale = saved;
-} catch { /* Browser storage may be unavailable. */ }
-$("handwritingScale").value = String(Math.round(handwritingScale * 100));
-$("handwritingScale").onchange = (event) => {
-  handwritingScale = Number(event.target.value) / 100;
-  try {
-    localStorage.setItem("bangtrang-handwriting-scale", String(handwritingScale));
-  } catch { /* Keep the setting for this session. */ }
-};
-
 setColor(color);
 chooseTool("pen");
 
@@ -429,32 +407,130 @@ function world(point) {
   };
 }
 
-function handwritingPoint(event) {
-  const point = world(screenPoint(event));
-  const scale = start.handwritingScale;
+function appendInkSample(event, endpoint = false) {
+  if (!start?.inkInput || !active?.points) return;
+  clearInkPreview();
+  const raw = world(screenPoint(event));
+  const point = clampToPage(raw);
+  // Keep every confirmed sensor sample independently of display filtering and
+  // duplicate suppression. Forecasts never enter this acquisition history.
+  const rawIndex = active.rawPoints.length;
+  active.rawPoints.push({ ...raw, pressure: Number.isFinite(event.pressure) ? event.pressure : 0.5,
+    tiltX: Number.isFinite(event.tiltX) ? event.tiltX : 0,
+    tiltY: Number.isFinite(event.tiltY) ? event.tiltY : 0,
+    t: event.timeStamp, ...(endpoint ? { endpoint: true } : {}) });
+  if (endpoint && start.inkLastRaw
+      && Math.hypot(point.x - start.inkLastRaw.x, point.y - start.inkLastRaw.y) * start.inkScale < 0.1) return;
+  start.inkLastRaw = point;
+  if (event.pressure > 0) start.lastPressure = event.pressure;
+  const sample = start.inkInput.sample({ ...point, time: event.timeStamp,
+    pressure: start.lastPressure, tiltX: event.tiltX, tiltY: event.tiltY }, endpoint);
+  const last = active.points[active.points.length - 1];
+  // Ignore stationary duplicates without losing pressure changes or the lift position.
+  if (last && Math.hypot(sample.x - last.x, sample.y - last.y) < 0.12 / view.z
+      && Math.abs(sample.p - last.p) < 0.015) return;
+  active.points.push({ ...sample, rawIndex });
+}
 
-  // Shrink only this stroke's movement, anchored where the pen touched down.
-  // Tool interactions and the starting position always use real coordinates.
-  return clampToPage({
-    x: start.x + (point.x - start.x) * scale,
-    y: start.y + (point.y - start.y) * scale,
+function clearInkPreview() {
+  if (inkPredictionTimer) { clearTimeout(inkPredictionTimer); inkPredictionTimer = 0; }
+  if (start?.inkInput) start.inkPreview = null;
+}
+
+function updateInkPreview(event) {
+  clearInkPreview();
+  if (!start?.inkInput || !active?.points?.length) return;
+  let predicted = [];
+  try {
+    predicted = (event.getPredictedEvents?.() || [])
+      .filter(item => item.pointerId === start.pointerId && item.pointerType === start.pointerType
+        && Number.isFinite(item.clientX) && Number.isFinite(item.clientY))
+      .map(item => ({ ...world(screenPoint(item)), time: item.timeStamp }));
+  } catch { /* Unsupported prediction APIs use the conservative velocity fallback. */ }
+  const forecast = start.inkInput.predict(predicted);
+  if (!forecast) return;
+  const last = active.points[active.points.length - 1];
+  const distance = Math.hypot(forecast.x - last.x, forecast.y - last.y) * start.inkScale;
+  if (!Number.isFinite(distance) || distance < 0.1) return;
+  const amount = Math.min(1, InkEngine.profile.predictionDistance / distance);
+  const point = clampToPage({ x: last.x + (forecast.x - last.x) * amount,
+    y: last.y + (forecast.y - last.y) * amount });
+  if (Math.hypot(point.x - last.x, point.y - last.y) * start.inkScale < 0.1) return;
+  start.inkPreview = InkEngine.previewStroke(active, { ...last, ...point, t: forecast.t });
+  start.inkPreviewExpires = performance.now() + InkEngine.profile.predictionLifetime;
+  const interaction = start;
+  inkPredictionTimer = setTimeout(() => {
+    inkPredictionTimer = 0;
+    if (start !== interaction || !dragging || !start.inkPreview) return;
+    start.inkPreview = null;
+    requestInkDraw();
+  }, InkEngine.profile.predictionLifetime);
+}
+
+function requestInkDraw() {
+  if (inkFrame) return;
+  inkFrame = requestAnimationFrame(() => {
+    inkFrame = 0;
+    if (!dragging || !active?.points || !start?.inkInput) return;
+    syncInkSurface();
+    if (!inkBackdrop) {
+      const stroke = active;
+      active = null;
+      draw({ preserveInkPreview: true });
+      active = stroke;
+      inkSurface.width = canvas.width;
+      inkSurface.height = canvas.height;
+      inkSurface.getContext("2d").drawImage(canvas, 0, 0);
+      inkBackdrop = { x: view.x, y: view.y, z: view.z };
+      $("welcome").hidden = true;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(inkSurface, 0, 0);
+    ctx.save();
+    ctx.setTransform(dpr * inkBackdrop.z, 0, 0, dpr * inkBackdrop.z,
+      dpr * inkBackdrop.x, dpr * inkBackdrop.y);
+    const page = start.page;
+    ctx.beginPath();
+    ctx.rect(page.x, page.y, page.w, page.h);
+    ctx.clip();
+    if (start.inkPreview && performance.now() >= start.inkPreviewExpires) clearInkPreview();
+    paintObject(ctx, start.inkPreview || active);
+    ctx.restore();
   });
+}
+
+function syncInkSurface() {
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.round(boardW * dpr), targetHeight = Math.round(boardH * dpr);
+  if (canvas.width === targetWidth && canvas.height === targetHeight) return;
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  inkBackdrop = null;
+  if (inkResolutionQuery && !inkResolutionQuery.matches) watchInkResolution();
 }
 
 function resize() {
   const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-
   boardW = rect.width;
   boardH = rect.height;
-
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
-
   draw();
 }
 
 new ResizeObserver(resize).observe($("workspace"));
+window.addEventListener("resize", resize);
+
+function watchInkResolution() {
+  inkResolutionQuery?.removeEventListener("change", inkResolutionChanged);
+  inkResolutionQuery = matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+  inkResolutionQuery.addEventListener("change", inkResolutionChanged);
+}
+function inkResolutionChanged() {
+  // Moving between displays can change DPR without changing the CSS page size.
+  watchInkResolution();
+  resize();
+}
+watchInkResolution();
 
 // =====================================================
 // 5. VẼ CÁC ĐỐI TƯỢNG
@@ -766,6 +842,11 @@ function paintObject(context, object) {
   }
 
   if (object.type === "pen" || object.type === "highlight") {
+    if ([2, 3, 4, 5, 6, 7, 8].includes(object.inkVersion)) {
+      InkEngine.paint(context, object);
+      context.restore();
+      return;
+    }
     context.globalAlpha = object.type === "highlight" ? 0.3 : 1;
 
     const points = object.points;
@@ -1145,8 +1226,9 @@ function clampToPage(point, page = start?.page) {
 // Keep objects on the sheet while allowing writing all the way to its edges.
 function scalePaperObject(object, scale) {
   if (scale >= 1) return;
+  InkEngine.invalidate(object);
   const box = bounds(object);
-  for (const points of [object.points, object.vertices]) points?.forEach(point => {
+  for (const points of [object.points, object.rawPoints, object.vertices]) points?.forEach(point => {
     point.x = box.x + (point.x - box.x) * scale;
     point.y = box.y + (point.y - box.y) * scale;
   });
@@ -1162,6 +1244,12 @@ function scalePaperObject(object, scale) {
   if (Number.isFinite(object.h)) object.h *= scale;
   if (object.type === "text") object.size = (object.size || 24) * scale;
   if (object.width) object.width *= scale;
+  if (object.inkVersion >= 4) {
+    for (const setting of ["rounding", "ropeSpacing", "ropeLimit", "ropeCornerRadius",
+      "ropeCornerDrift", "ropeCornerSupport"]) {
+      if (Number.isFinite(object.inkOptions?.[setting])) object.inkOptions[setting] *= scale;
+    }
+  }
 }
 
 function fitObjectOnPaper(object) {
@@ -1275,8 +1363,14 @@ function paintPaper(context, page, guides = false, background = paperBackground,
   context.restore();
 }
 
-function draw() {
+function draw({ preserveInkPreview = false } = {}) {
+  if (inkFrame) { cancelAnimationFrame(inkFrame); inkFrame = 0; }
+  if (!preserveInkPreview) clearInkPreview();
+  inkBackdrop = null;
   if (!boardW) return;
+  // Each render verifies the backing scale as well as listening for display
+  // changes, so a missed resolution event cannot reuse a bitmap at the old DPR.
+  syncInkSurface();
   const pdfPages = pdfDocumentPages();
   const documentMode = pdfPages.length > 0;
   document.body.classList.toggle("pdf-document-mode", documentMode);
@@ -1290,6 +1384,7 @@ function draw() {
   } else {
     view.z = Math.max(0.1, Math.min(4, view.z));
   }
+  updateZoomControls();
   if (view.fit !== false || pageWidth * view.z <= boardW - 48) {
     view.x = (boardW - pageWidth * view.z) / 2;
   } else {
@@ -1430,7 +1525,6 @@ function draw() {
   $("objectCount").textContent = `${objects.length} đối tượng`;
   $("undoBtn").disabled = !undoStack.length;
   $("redoBtn").disabled = !redoStack.length;
-  $("resetView").textContent = `${Math.round(view.z * 100)}%`;
   updateBoardScrollbar();
   if (tool === "moveLasso") {
     const button = document.querySelector('[data-tool="moveLasso"]').getBoundingClientRect();
@@ -1659,6 +1753,28 @@ function isInkObject(object) {
   return ["pen", "highlight"].includes(object.type) && !isUploadedObject(object);
 }
 
+function inkFragment(object, points) {
+  const fragment = { ...object, points };
+  if (object.inkOptions) fragment.inkOptions = { ...object.inkOptions };
+  for (const key of ["clipRegions", "cutouts"]) {
+    if (object[key]) fragment[key] = object[key].map(region => region.map(point => ({ ...point })));
+  }
+  if (!Array.isArray(object.rawPoints)) return fragment;
+  const first = points[0]?.rawIndex, last = points[points.length - 1]?.rawIndex;
+  if (!points.every((point, index) => Number.isInteger(point.rawIndex)
+      && point.rawIndex >= 0 && point.rawIndex < object.rawPoints.length
+      && (!index || point.rawIndex >= points[index - 1].rawIndex))) {
+    delete fragment.rawPoints;
+    fragment.points = points.map(({ rawIndex, ...point }) => point);
+    return fragment;
+  }
+  const end = points[points.length - 1] === object.points[object.points.length - 1]
+    ? object.rawPoints.length : last + 1;
+  fragment.rawPoints = object.rawPoints.slice(first, end).map(point => ({ ...point }));
+  fragment.points = points.map(point => ({ ...point, rawIndex: point.rawIndex - first }));
+  return fragment;
+}
+
 function eraseAlong(eraserStart, eraserEnd) {
   const radius = 12 / view.z;
   const updatedObjects = [];
@@ -1668,7 +1784,10 @@ function eraseAlong(eraserStart, eraserEnd) {
     if (isUploadedObject(object)) {
       updatedObjects.push(object);
     } else if (object.type === "pen" || object.type === "highlight") {
-      const strokeRadius = radius + (object.width || 1) / 2;
+      const simulatedWidth = object.inkVersion === 3 && object.inkOptions?.simulatePressure
+        ? 1 + Math.max(0, Math.min(1, Number(object.inkOptions.thinning) || 0)) : 1;
+      const maxPressure = object.points.reduce((value, point) => Math.max(value, point.p || 1), simulatedWidth);
+      const strokeRadius = radius + (object.width || 1) * (object.type === "highlight" ? 6 : 1) * maxPressure / 2;
       const remainingRuns = splitStrokeAtEraser(
         object,
         eraserStart,
@@ -1684,7 +1803,7 @@ function eraseAlong(eraserStart, eraserEnd) {
       } else {
         changedObjects = true;
         remainingRuns.forEach((points) => {
-          updatedObjects.push({ ...object, points });
+          updatedObjects.push(inkFragment(object, points));
         });
       }
     } else if (
@@ -1725,13 +1844,13 @@ function eraseObjectAt(point) {
 }
 
 function moveObject(object, dx, dy) {
+  InkEngine.invalidate(object);
   for (const region of [...(object.clipRegions || []), ...(object.cutouts || [])]) {
     region.forEach(point => { point.x += dx; point.y += dy; });
   }
   if (object.points) {
-    object.points.forEach((point) => {
-      point.x += dx;
-      point.y += dy;
+    for (const points of [object.points, object.rawPoints]) points?.forEach(point => {
+      point.x += dx; point.y += dy;
     });
   } else if (object.vertices) {
     object.vertices.forEach((point) => {
@@ -2061,6 +2180,18 @@ function hitResizeHandle(point) {
 // =====================================================
 
 canvas.onpointerdown = (event) => {
+  if (event.pointerType === "pen" && (paperGesture || (dragging && start?.pointerType === "touch"))) {
+    if (start?.groupMove) finishGroupMove(true);
+    active = null;
+    start = null;
+    dragging = false;
+    paperGesture = null;
+    touchPointers.clear();
+    draw();
+  }
+  // A palm or another pointer must never replace the pen's active stroke.
+  if (dragging && start?.pointerType === "pen") return;
+  if (dragging && event.pointerType !== "touch") return;
   if (event.pointerType === "touch") {
     touchPointers.set(event.pointerId, screenPoint(event));
     canvas.setPointerCapture(event.pointerId);
@@ -2069,8 +2200,7 @@ canvas.onpointerdown = (event) => {
       clearGroupSelection();
       const [a, b] = [...touchPointers.values()];
       const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      paperGesture = { distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
-        anchor: world(center), z: view.z };
+      paperGesture = { center, x: view.x, y: view.y };
       active = null;
       dragging = false;
       start = null;
@@ -2092,6 +2222,7 @@ canvas.onpointerdown = (event) => {
 
   start = {
     pointerId: event.pointerId,
+    pointerType: event.pointerType,
     page,
     ...point,
     sx: screen.x,
@@ -2206,21 +2337,24 @@ canvas.onpointerdown = (event) => {
   }
 
   if (tool === "pen" || tool === "highlight") {
-    start.handwritingScale = event.pointerType === "pen" ? handwritingScale : 1;
+    start.inkScale = view.z;
+    start.inkInput = InkEngine.createInput({ scale: view.z, type: tool,
+      pointerType: event.pointerType, positionMode: "adaptive" });
+    start.lastPressure = event.pressure > 0 ? event.pressure : 0.5;
+    selected = -1;
+    selection = null;
     active = {
       type: tool,
       color,
-      width,
-      points: [
-        {
-          ...point,
-          p:
-            event.pointerType === "pen"
-              ? Math.max(0.2, event.pressure * 2)
-              : 1,
-        },
-      ],
+      // Capture a fine, readable screen width in document units. It stays
+      // vector-based and scales naturally if the page is fitted on another screen.
+      width: (tool === "highlight" ? 3 : InkEngine.profile.penSize) / view.z,
+      inkVersion: InkEngine.profile.version,
+      inkOptions: InkEngine.strokeOptions({ scale: view.z }, event.pointerType, tool),
+      points: [],
+      rawPoints: [],
     };
+    appendInkSample(event);
   } else {
     active = {
       type: tool,
@@ -2237,17 +2371,15 @@ canvas.onpointerdown = (event) => {
 };
 
 canvas.onpointermove = (event) => {
+  if (dragging && start && event.pointerId !== start.pointerId && !paperGesture) return;
   const screen = screenPoint(event);
   if (touchPointers.has(event.pointerId)) touchPointers.set(event.pointerId, screen);
   if (paperGesture) {
     if (touchPointers.size >= 2) {
       const [a, b] = [...touchPointers.values()];
-      const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
-      view.fit = false;
-      view.z = Math.max(0.1, Math.min(4,
-        paperGesture.z * Math.pow(distance / paperGesture.distance, 0.5)));
-      view.x = (a.x + b.x) / 2 - paperGesture.anchor.x * view.z;
-      view.y = (a.y + b.y) / 2 - paperGesture.anchor.y * view.z;
+      view.x = paperGesture.x + (a.x + b.x) / 2 - paperGesture.center.x;
+      view.y = Math.min(0, paperGesture.y + (a.y + b.y) / 2 - paperGesture.center.y);
+      extendPaperForScroll();
       draw();
     }
     return;
@@ -2383,14 +2515,11 @@ canvas.onpointermove = (event) => {
       }
 
       for (const item of events) {
-        active.points.push({
-          ...handwritingPoint(item),
-          p:
-            item.pointerType === "pen"
-              ? Math.max(0.2, item.pressure * 2)
-              : 1,
-        });
+        appendInkSample(item);
       }
+      updateInkPreview(event);
+      requestInkDraw();
+      return;
     } else {
       active.w = point.x - start.x;
       active.h = point.y - start.y;
@@ -2559,6 +2688,29 @@ function beautifyStroke(points) {
   return fitCurve(sampled);
 }
 
+function editedInkSamples(object, points) {
+  if (!object.rawPoints?.length || !object.points.length) return points;
+  const distances = path => {
+    const lengths = [0];
+    for (let i = 1; i < path.length; i++) lengths.push(lengths[i - 1]
+      + Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y));
+    return lengths;
+  };
+  const source = distances(object.points), edited = distances(points);
+  let index = 0;
+  // Manual shape fitting changes the visible path, while its capture history
+  // stays intact. Match acquisition metadata by progress along each path.
+  return points.map((point, i) => {
+    const progress = edited[edited.length - 1] ? edited[i] / edited[edited.length - 1] : 0;
+    const target = progress * source[source.length - 1];
+    while (index + 1 < source.length && Math.abs(source[index + 1] - target) <= Math.abs(source[index] - target)) index++;
+    if (!i) index = 0;
+    if (i === points.length - 1) index = object.points.length - 1;
+    const sample = object.points[index];
+    return { ...point, ...sample, x: point.x, y: point.y, p: point.p };
+  });
+}
+
 function beautifySelection() {
   const left = Math.min(selection.x, selection.x + selection.w);
   const right = Math.max(selection.x, selection.x + selection.w);
@@ -2602,7 +2754,10 @@ function beautifySelection() {
       for (const { point } of group) { point.x = x; point.y = y; }
     }
     snapshot();
-    for (const { object, points } of edits) object.points = points;
+    for (const { object, points } of edits) {
+      InkEngine.invalidate(object);
+      object.points = editedInkSamples(object, points);
+    }
     changed();
   }
   const message = edits.length
@@ -2803,6 +2958,19 @@ function finishPointer(event) {
     }
     return;
   }
+  if (!dragging || !start || event.pointerId !== start.pointerId) return;
+  if (start.inkInput) {
+    clearInkPreview();
+    if (event.type === "pointercancel") {
+      active = null;
+      start = null;
+      dragging = false;
+      draw();
+      return;
+    }
+    // Include the final coordinate but keep pressure from before pen-up (usually zero).
+    appendInkSample(event, true);
+  }
   if (tool === "moveLasso" && dragging) {
     if (event.pointerId !== start.pointerId) return;
     if (event.type === "pointercancel") {
@@ -2829,20 +2997,8 @@ canvas.onpointerleave = () => {
 };
 
 // =====================================================
-// 8. ZOOM, NỀN BẢNG VÀ XÓA BẢNG
+// 8. ĐIỀU HƯỚNG TRANG, NỀN BẢNG VÀ XÓA BẢNG
 // =====================================================
-
-function zoom(
-  factor,
-  point = { x: boardW / 2, y: boardH / 2 },
-) {
-  const anchor = world(point);
-  view.fit = false;
-  view.z = Math.max(0.1, Math.min(4, view.z * factor));
-  view.x = point.x - anchor.x * view.z;
-  view.y = point.y - anchor.y * view.z;
-  draw();
-}
 
 function updateBoardScrollbar() {
   const rail = $("boardScroll");
@@ -2941,38 +3097,47 @@ canvas.addEventListener(
     event.preventDefault();
 
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? boardH : 1;
-    if (event.ctrlKey || event.metaKey) {
-      // Cap each wheel event and use a gentle curve for controllable zoom.
-      const delta = Math.max(-80, Math.min(80, event.deltaY * unit));
-      zoom(Math.exp(-delta * 0.001), screenPoint(event));
-    } else {
-      view.x -= (event.shiftKey ? event.deltaY : event.deltaX) * unit;
-      if (!event.shiftKey) {
-        view.y = Math.min(0, view.y - event.deltaY * unit);
-        extendPaperForScroll();
-      }
-      draw();
+    if (event.ctrlKey || event.metaKey) return;
+    view.x -= (event.shiftKey ? event.deltaY : event.deltaX) * unit;
+    if (!event.shiftKey) {
+      view.y = Math.min(0, view.y - event.deltaY * unit);
+      extendPaperForScroll();
     }
+    draw();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveLesson, 600);
   },
   { passive: false },
 );
 
+function updateZoomControls() {
+  const percent = Math.round(view.z * 100);
+  $("zoomPercent").value = `${percent}%`;
+  $("zoomOut").disabled = percent <= 50;
+  $("zoomIn").disabled = percent >= 200;
+}
+
+function setBoardZoom(nextZoom) {
+  const nextScale = Math.max(0.5, Math.min(2, nextZoom));
+  if (nextScale === view.z) return;
+
+  const centerY = (boardH / 2 - view.y) / view.z;
+  view.z = nextScale;
+  view.fit = false;
+  view.y = boardH / 2 - centerY * view.z;
+  draw();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveLesson, 600);
+}
+
+$("zoomOut").onclick = () => setBoardZoom(Math.round(view.z * 100) / 100 - 0.1);
+$("zoomIn").onclick = () => setBoardZoom(Math.round(view.z * 100) / 100 + 0.1);
+
 $("toggleSidebar").onclick = () => {
   const collapsed = document.body.classList.toggle("sidebar-collapsed");
   $("toggleSidebar").setAttribute("aria-expanded", String(!collapsed));
   resize();
 };
-
-$("resetView").onclick = () => {
-  view = { x: 0, y: 0, z: 1, fit: true };
-  draw();
-  saveLesson();
-};
-
-$("zoomIn").onclick = () => { zoom(1.05); saveLesson(); };
-$("zoomOut").onclick = () => { zoom(1 / 1.05); saveLesson(); };
 
 $("addPageBtn").onclick = () => {
   if (pdfDocumentPages().length) return;
@@ -3129,6 +3294,7 @@ $("paperDialog").onclose = () => { paperGalleryObserver?.disconnect(); paperDraf
 $("galleryAddPage").onclick = () => { $("addPageBtn").click(); renderPaperGallery(); };
 
 function clearBoardInteraction() {
+  clearInkPreview();
   clearGroupSelection();
   selected = -1;
   selection = null;
@@ -3148,7 +3314,7 @@ $("clearBtn").onclick = () => {
   fileImportRevision++;
   objects = [];
   paperPageCount = 1;
-  view = { x: 0, y: 0, z: 1, fit: true };
+  view = { x: 0, y: 0, z: 1, fit: false };
   images.clear();
   clearBoardInteraction();
   changed();
@@ -3171,7 +3337,7 @@ $("removeFilesBtn").onclick = () => {
   objects = objects.filter(object => !isUploadedObject(object));
   images.clear();
   paperPageCount = contentPageCount();
-  view = { x: 0, y: 0, z: 1, fit: true };
+  view = { x: 0, y: 0, z: 1, fit: false };
   clearBoardInteraction();
   changed();
   toast("Đã gỡ toàn bộ ảnh và file khỏi bảng. Ctrl + Z để hoàn tác.");
@@ -3819,7 +3985,7 @@ function paintInequalityRegion(context, object, test, color) {
   for (let py = 0; py < object.h; py += cellSize) {
     let runStart = null;
     for (let px = 0; px <= object.w; px += cellSize) {
-      const inside = px < object.w && !test((px + 1 - object.w / 2) / unit,
+      const inside = px < object.w && test((px + 1 - object.w / 2) / unit,
         (object.h / 2 - py - 1) / unit);
       if (inside && runStart === null) runStart = px;
       if (!inside && runStart !== null) {
@@ -4054,6 +4220,20 @@ function paintGraph(context, object) {
     return;
   }
 
+  if (object.kind === "inequality") {
+    // Keep the coordinate range, boundaries, hatching and labels when resizing.
+    context.save();
+    context.translate(object.x, object.y);
+    context.scale(object.w / 560, object.h / 420);
+    paintFunctionGraph(context, { ...object, x: 0, y: 0, w: 560, h: 420 });
+    context.restore();
+    return;
+  }
+
+  paintFunctionGraph(context, object);
+}
+
+function paintFunctionGraph(context, object) {
   const color = object.color || "#245bea";
   const fn = object.kind === "inequality"
     ? compileInequality(object.expression)
@@ -4143,7 +4323,7 @@ function paintGraph(context, object) {
     context.font = 'italic 16px "Times New Roman", serif';
     const width = Math.min(object.w - 36, Math.max(...labels.map(text => context.measureText(text).width)) + 12);
     const height = labels.length * 20 + 8;
-    // Put the annotation in the unhatched solution area, away from the axes.
+    // Put the annotation in the unhatched area, away from the axes.
     findLabel: for (let y = 40; y < object.h - height - 12; y += 20) {
       for (let x = 20; x < object.w - width - 12; x += 20) {
         if (x < object.w / 2 + 16 && x + width > object.w / 2 - 16) continue;
@@ -4151,7 +4331,7 @@ function paintGraph(context, object) {
         let fits = true;
         for (const dx of [0, width / 2, width]) {
           for (const dy of [0, height / 2, height]) {
-            if (!fn((x + dx - object.w / 2) / 50, (object.h / 2 - y - dy) / 50)) fits = false;
+            if (fn((x + dx - object.w / 2) / 50, (object.h / 2 - y - dy) / 50)) fits = false;
           }
         }
         if (fits) { labelX = object.x + x; labelY = object.y + y + 16; break findLabel; }
@@ -4270,9 +4450,9 @@ function syncGraphInputs() {
       ? "Hệ trục không gian x, y, z được minh họa trên bảng 2D. Kéo để di chuyển hoặc thay đổi kích thước."
       : "Chèn hệ trục x, y có lưới và vạch chia để vẽ, ghi chú lên bảng.";
   } else if (isSystem) {
-    $("graphHint").textContent = "Mỗi dòng một bất phương trình, tối đa 12 điều kiện. Phần trắng là miền nghiệm chung, phần bị loại được gạch chéo. Biên nét liền cho ≤, ≥, nét đứt cho <, >. Mỗi vạch bằng 1 đơn vị.";
+    $("graphHint").textContent = "Mỗi dòng một bất phương trình, tối đa 12 điều kiện. Phần gạch chéo là miền nghiệm chung, phần trắng không thuộc miền nghiệm. Biên nét liền cho ≤, ≥, nét đứt cho <, >. Mỗi vạch bằng 1 đơn vị. Thu nhỏ hình vẫn giữ nguyên phạm vi tọa độ.";
   } else if (isInequality) {
-    $("graphHint").textContent = "Ví dụ: x + 2*y < 4. Phần trắng là miền nghiệm, phần bị loại được gạch chéo; mỗi vạch trục bằng 1 đơn vị.";
+    $("graphHint").textContent = "Ví dụ: x + 2*y < 4. Phần gạch chéo là miền nghiệm, phần trắng không thuộc miền nghiệm; mỗi vạch trục bằng 1 đơn vị. Thu nhỏ hình vẫn giữ nguyên phạm vi tọa độ.";
   } else if (isVariation) {
     $("graphHint").textContent = "Xét giới hạn tại ±∞, điểm cực trị và chiều biến thiên của hàm số.";
   } else {
@@ -4725,6 +4905,22 @@ function validateDoc(data) {
       throw new Error("Tọa độ không hợp lệ.");
     }
 
+    if (object.rawPoints !== undefined) {
+      if (!Array.isArray(object.rawPoints) || object.rawPoints.length > 100000
+          || object.rawPoints.some(point => !point || !Number.isFinite(point.x)
+            || !Number.isFinite(point.y) || !Number.isFinite(point.t)
+            || !Number.isFinite(point.pressure) || point.pressure < 0 || point.pressure > 1
+            || !Number.isFinite(point.tiltX) || Math.abs(point.tiltX) > 90
+            || !Number.isFinite(point.tiltY) || Math.abs(point.tiltY) > 90
+            || (point.endpoint !== undefined && typeof point.endpoint !== "boolean"))
+          || !Array.isArray(object.points) || object.points.some((point, index) =>
+            !Number.isInteger(point.rawIndex) || point.rawIndex < 0
+            || point.rawIndex >= object.rawPoints.length
+            || (index > 0 && point.rawIndex < object.points[index - 1].rawIndex))) {
+        throw new Error("Dữ liệu mẫu bút không hợp lệ.");
+      }
+    }
+
     if (object.vertices) {
       const vertexCounts = {
         line: 2,
@@ -4900,7 +5096,12 @@ function applyDoc(data) {
     data.view.z >= 0.1 &&
     data.view.z <= 4
   ) {
-    view = { x: data.view.x, y: data.view.y, z: data.view.z, fit: data.view.fit !== false };
+    view = {
+      x: data.view.x,
+      y: data.view.y,
+      z: Math.max(0.5, Math.min(2, data.view.z)),
+      fit: false,
+    };
   }
 
   if (paperTemplates.some(template => template.id === data.background)) {
