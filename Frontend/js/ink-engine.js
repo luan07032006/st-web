@@ -1,12 +1,12 @@
 "use strict";
 
 window.InkEngine = (() => {
-  // 1. Gộp cấu hình: Giữ nguyên các thông số cũ, ghi đè/thêm mới các thông số của bản v10
   const profile = Object.freeze({
-    version: 10,
+    version: 11,
     penSize: 1.6,
-    minPressure: 0.86,
-    maxPressure: 1.14,
+    minPressure: 0.35,
+    maxPressure: 1.65,
+    taperRatio: 0.08,
     cornerRadius: 1.2,
     predictionDistance: 2,   
     predictionHorizon: 12,   
@@ -35,18 +35,16 @@ window.InkEngine = (() => {
   const alpha = (cutoff, dt) => 1 - Math.exp(-2 * Math.PI * cutoff * dt);
   const euroAlpha = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
 
-  // Bộ nhớ đệm của file gốc (Giữ nguyên cho các hàm không liên quan)
   const legacyCache = new WeakMap(); 
   const freehandCache = new WeakMap();
   const previewSources = new WeakMap();
 
-  // Bộ nhớ đệm mới của bản v10
   const cache = new WeakMap();
   const sources = new WeakMap();
+  const outlineCache = new WeakMap();
+  const liveGeometry = new WeakMap();
+  const forecasts = new WeakMap();
 
-  // ==========================================================================
-  // THAY ĐỔI HOÀN TOÀN: Hàm createInput theo bản v10
-  // ==========================================================================
   function createInput(options = {}) {
     const scale = clamp(finite(options.scale, 1), 0.1, 4);
     const isPen = options.pointerType === "pen";
@@ -54,6 +52,7 @@ window.InkEngine = (() => {
     let prev = null;
     let fx = 0, fy = 0;
     let vx = 0, vy = 0;
+    let velocity = 0;
     let direction = null, steady = 0;
 
     return {
@@ -75,6 +74,12 @@ window.InkEngine = (() => {
           const k = euroAlpha(cutoff, dt);
           if (endpoint || !smooth) { fx = sx; fy = sy; }
           else { fx = mix(fx, sx, k); fy = mix(fy, sy, k); }
+          // Limit positional lag in screen pixels, independently of zoom/DPR.
+          const lag = Math.hypot(sx - fx, sy - fy);
+          if (smooth && lag > profile.inputMaxLag) {
+            fx = sx + (fx - sx) * profile.inputMaxLag / lag;
+            fy = sy + (fy - sy) * profile.inputMaxLag / lag;
+          }
         }
 
         const rawTravel = prev ? Math.hypot(input.x - prev.rawX, input.y - prev.rawY) * scale : 0;
@@ -89,19 +94,22 @@ window.InkEngine = (() => {
         const filteredPressure = prev && isPen
           ? (endpoint ? prev.pressure : mix(prev.pressure, pressure, euroAlpha(18, dt)))
           : pressure;
-        const target = options.type === "highlight" ? 1
-          : isPen ? 0.92 + 0.16 * Math.pow(filteredPressure, 0.7) : 1;
-        const p = clamp(target, profile.minPressure, profile.maxPressure);
+        const speed = prev ? rawTravel / (dt * 1000) : 0; // CSS px / ms
+        velocity = prev ? mix(velocity, speed, alpha(12, dt)) : speed;
+        const pressureWidth = isPen ? 0.45 + 1.2 * Math.pow(filteredPressure, 0.7) : 1;
+        const speedWidth = 1.12 - 0.4 * velocity / (velocity + 0.6);
+        const target = options.type === "highlight" ? 1 : pressureWidth * speedWidth;
+        const p = endpoint && prev ? prev.p : clamp(target, profile.minPressure, profile.maxPressure);
 
         const x = fx / scale, y = fy / scale;
         prev = { x, y, rawX: input.x, rawY: input.y, time, elapsed, p,
           pressure: filteredPressure, tiltX, tiltY,
           ddx: nextDirection ? (input.x - (prev ? prev.rawX : input.x)) : 0,
           ddy: nextDirection ? (input.y - (prev ? prev.rawY : input.y)) : 0 };
-        return { x, y, p, pressure: filteredPressure, tiltX, tiltY, t: time };
+        return { x, y, p, pressure: filteredPressure, tiltX, tiltY, velocity, t: time };
       },
       predict(predictions = []) {
-        if (!prev || options.type === "highlight" || !smooth) return null;
+        if (!prev || steady < 2 || options.type === "highlight" || !smooth) return null;
         let tx = prev.rawX, ty = prev.rawY, tt = prev.time;
         if (steady >= 2 && direction) {
           let target = null;
@@ -124,15 +132,17 @@ window.InkEngine = (() => {
             tx = prev.rawX + dx * amount; ty = prev.rawY + dy * amount; tt = target.time;
           }
         }
-        if (Math.hypot(tx - prev.x, ty - prev.y) * scale < 0.1) return null;
+        const lead = Math.hypot(tx - prev.x, ty - prev.y) * scale;
+        if (lead < 0.1) return null;
+        if (lead > profile.predictionDistance) {
+          const amount = profile.predictionDistance / lead;
+          tx = mix(prev.x, tx, amount); ty = mix(prev.y, ty, amount);
+        }
         return { x: tx, y: ty, p: prev.p, pressure: prev.pressure, tiltX: prev.tiltX, tiltY: prev.tiltY, t: tt };
       }
     };
   }
 
-  // ==========================================================================
-  // GIỮ NGUYÊN: Các hàm không liên quan từ file gốc
-  // ==========================================================================
   const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, p: (finite(a.p, 1) + finite(b.p, 1)) / 2 });
   const number = value => String(Math.round(value * 10000) / 10000);
   const xy = point => `${number(point.x)} ${number(point.y)}`;
@@ -326,7 +336,7 @@ window.InkEngine = (() => {
       for (let i = entry.samples.length; i < points.length; i++) {
         const point = points[i];
         if (i && Math.hypot(point.x - points[0].x, point.y - points[0].y) > 1e-6) entry.hasMovement = true;
-        const p = rounded || rope ? clamp(finite(point.p, 1), profile.minPressure, profile.maxPressure) : finite(point.p, 1);
+        const p = rounded || rope ? clamp(finite(point.p, 1), 0.86, 1.14) : finite(point.p, 1);
         entry.samples.push([point.x, point.y, clamp(p / 2, 0, 1)]);
       }
       let samples = entry.samples;
@@ -355,7 +365,7 @@ window.InkEngine = (() => {
     if (points.length && !entry.hasMovement) {
       const point = points[points.length - 1];
       const r = options.simulatePressure ? width / 2 : rounded || rope
-        ? width * clamp(finite(point.p, 1), profile.minPressure, profile.maxPressure) / 2 : radius(point, width);
+        ? width * clamp(finite(point.p, 1), 0.86, 1.14) / 2 : radius(point, width);
       path.arc(point.x, point.y, r, 0, Math.PI * 2);
     } else if (points.length > 1) {
       if (samples.length === 2) {
@@ -377,11 +387,8 @@ window.InkEngine = (() => {
     return entry;
   }
 
-  // ==========================================================================
-  // THAY ĐỔI HOÀN TOÀN: Các hàm API render nét vẽ theo bản v10
-  // ==========================================================================
   const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  const pw = point => clamp(finite(point.p, 1), profile.minPressure, profile.maxPressure);
+  const pw = point => clamp(finite(point.p, 1), 0.86, 1.14);
   const baseWidth = object => Math.max(0.1, finite(object.width, 3)) * (object.type === "highlight" ? 6 : 1);
 
   function bucketFor(buckets, width, point, highlight) {
@@ -419,7 +426,7 @@ window.InkEngine = (() => {
     for (const { path, w } of buckets.values()) { context.lineWidth = w; context.stroke(path); }
   }
 
-  function paint(context, object) {
+  function paintV10(context, object) {
     const points = object.points || [];
     if (!points.length) return;
     const highlight = object.type === "highlight";
@@ -462,23 +469,249 @@ window.InkEngine = (() => {
   }
 
   function previewStroke(object, point) {
-    const preview = { ...object, points: [...object.points, point] };
-    sources.set(preview.points, object);
+    const preview = { ...object };
+    let points;
+    // The live renderer reads only the forecast; materialize the full array only
+    // for callers that explicitly request a standalone vector preview.
+    Object.defineProperty(preview, "points", { enumerable: true, get() {
+      if (!points) {
+        points = [...object.points, point];
+        sources.set(points, object);
+        previewSources.set(points, object);
+      }
+      return points;
+    } });
+    forecasts.set(preview, point);
     return preview;
   }
 
   function invalidate(object) {
     if (!object || !object.points) return;
-    // Clear cả bộ nhớ đệm cũ và mới cho an toàn
     legacyCache.delete(object.points);
     freehandCache.delete(object.points);
     cache.delete(object.points);
     sources.delete(object.points);
+    outlineCache.delete(object.points);
+    liveGeometry.delete(object.points);
     if ([6, 7, 8, 9].includes(object.inkVersion) && window.RopeInk) window.RopeInk.invalidate(object);
   }
 
-  const centerline = object => (object.points || []).map(p => [p.x, p.y, pw(p) / 2]);
-  const ropeState = object => ({ anchors: [], lockedCount: 0, spacing: profile.ropeSpacing });
+  // New strokes use cubic Catmull-Rom segments expanded into filled ribbons.
+  // Each segment depends on at most four input points; a confirmed prefix never
+  // needs to be rebuilt while the pen is moving.
+  function unionBounds(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+      right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) };
+  }
 
-  return { profile, createInput, strokeOptions, centerline, ropeState, previewStroke, paint, invalidate };
+  function cubicRibbon(points, i, width, lengths, taper = 0, total = 0) {
+    const a = points[i], b = points[i + 1];
+    const before = points[i - 1] || a, after = points[i + 2] || b;
+    const distance = Math.hypot(b.x - a.x, b.y - a.y);
+    const handle = (x, y) => {
+      const length = Math.hypot(x, y) || 1;
+      const amount = Math.min(1 / 6, distance / (3 * length));
+      return { x: x * amount, y: y * amount };
+    };
+    const h1 = handle(b.x - before.x, b.y - before.y);
+    const h2 = handle(after.x - a.x, after.y - a.y);
+    const c1 = { x: a.x + h1.x, y: a.y + h1.y };
+    const c2 = { x: b.x - h2.x, y: b.y - h2.y };
+    const steps = clamp(Math.ceil(distance / Math.max(0.25, width / 3)), 4, 128);
+    const left = [], right = [], caps = [];
+    let bounds = null;
+    for (let j = 0; j <= steps; j++) {
+      const t = j / steps, u = 1 - t;
+      const x = u ** 3 * a.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t ** 3 * b.x;
+      const y = u ** 3 * a.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t ** 3 * b.y;
+      let dx = u * u * (c1.x - a.x) + 2 * u * t * (c2.x - c1.x) + t * t * (b.x - c2.x);
+      let dy = u * u * (c1.y - a.y) + 2 * u * t * (c2.y - c1.y) + t * t * (b.y - c2.y);
+      if (Math.hypot(dx, dy) < 1e-8) { dx = b.x - a.x; dy = b.y - a.y; }
+      const length = Math.hypot(dx, dy) || 1;
+      const s = mix(lengths[i], lengths[i + 1], t);
+      const edge = taper ? clamp(Math.min(s, total - s) / taper, 0, 1) : 1;
+      const shaping = taper ? 0.08 + 0.92 * edge * edge * (3 - 2 * edge) : 1;
+      const p = mix(finite(a.p, 1), finite(b.p, 1), t);
+      const r = width * clamp(p, profile.minPressure, profile.maxPressure) * shaping / 2;
+      left.push({ x: x - dy / length * r, y: y + dx / length * r });
+      right.push({ x: x + dy / length * r, y: y - dx / length * r });
+      if (j === 0 || j === steps) caps.push({ x, y, r });
+      bounds = unionBounds(bounds, { x: x - r, y: y - r, right: x + r, bottom: y + r });
+    }
+    // All subpaths have the same winding, including round joins/caps, so
+    // self intersections form one opaque mask with uniform highlighter alpha.
+    const path = new Path2D();
+    const edge = points => {
+      for (let i = 1; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        path.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      }
+      path.lineTo(points.at(-1).x, points.at(-1).y);
+    };
+    path.moveTo(right[0].x, right[0].y); edge(right);
+    left.reverse(); path.lineTo(left[0].x, left[0].y); edge(left); path.closePath();
+    for (const point of caps) {
+      path.moveTo(point.x + point.r, point.y);
+      path.arc(point.x, point.y, point.r, 0, Math.PI * 2);
+    }
+    return { path, bounds };
+  }
+
+  function dotGeometry(point, width) {
+    const r = width * clamp(finite(point.p, 1), profile.minPressure, profile.maxPressure) / 2;
+    const path = new Path2D();
+    path.arc(point.x, point.y, r, 0, Math.PI * 2);
+    return { path, bounds: { x: point.x - r, y: point.y - r, right: point.x + r, bottom: point.y + r } };
+  }
+
+  function lengthsFor(points, lengths = [0]) {
+    for (let i = lengths.length; i < points.length; i++) {
+      lengths.push(lengths[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+    }
+    return lengths;
+  }
+
+  function polishedOutline(points, width, lengths, total, closed, highlight) {
+    if (!points.length) return new Path2D();
+    if (total < 1e-6) return dotGeometry(points.at(-1), width).path;
+    const count = closed ? points.length - 1 : points.length;
+    const left = [], right = [], radii = [];
+    const taper = closed || highlight || total <= width * 2 ? 0 : total * profile.taperRatio;
+    for (let i = 0; i < count; i++) {
+      const point = points[i];
+      const a = closed ? points[(i + count - 1) % count] : points[Math.max(0, i - 1)];
+      const b = closed ? points[(i + 1) % count] : points[Math.min(count - 1, i + 1)];
+      const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy) || 1;
+      const edge = taper ? clamp(Math.min(lengths[i], total - lengths[i]) / taper, 0, 1) : 1;
+      const shaping = taper ? .08 + .92 * edge * edge * (3 - 2 * edge) : 1;
+      const r = width * (highlight ? 1 : clamp(finite(point.p, 1), .9, 1.1)) * shaping / 2;
+      radii.push(r);
+      left.push({ x: point.x - dy / length * r, y: point.y + dx / length * r });
+      right.push({ x: point.x + dy / length * r, y: point.y - dx / length * r });
+    }
+    const path = new Path2D();
+    const trace = (rail, loop) => {
+      if (loop) {
+        const last = rail.at(-1), first = rail[0];
+        path.moveTo((last.x + first.x) / 2, (last.y + first.y) / 2);
+        for (let i = 0; i < rail.length; i++) {
+          const a = rail[i], b = rail[(i + 1) % rail.length];
+          path.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        }
+        path.closePath();
+      } else {
+        for (let i = 1; i < rail.length - 1; i++) {
+          const a = rail[i], b = rail[i + 1];
+          path.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        }
+        path.lineTo(rail.at(-1).x, rail.at(-1).y);
+      }
+    };
+    if (closed) {
+      // Opposite winding retains the loop's opening without a join/cap seam.
+      trace(right, true); trace(left.reverse(), true);
+    } else {
+      path.moveTo(right[0].x, right[0].y); trace(right, false);
+      const last = points.at(-1), endAngle = Math.atan2(right.at(-1).y - last.y, right.at(-1).x - last.x);
+      path.arc(last.x, last.y, radii.at(-1), endAngle, endAngle + Math.PI);
+      left.reverse(); trace(left, false);
+      const first = points[0], startAngle = Math.atan2(left.at(-1).y - first.y, left.at(-1).x - first.x);
+      path.arc(first.x, first.y, radii[0], startAngle, startAngle + Math.PI);
+      path.closePath();
+    }
+    return path;
+  }
+
+  function outlineGeometry(object) {
+    const points = object.points || [], width = baseWidth(object);
+    const closed = object.inkOptions?.closed === true && points.length > 2
+      && Math.hypot(points[0].x - points.at(-1).x, points[0].y - points.at(-1).y) < 1e-5;
+    const polished = object.inkOptions?.refinementVersion >= 2;
+    let entry = outlineCache.get(points);
+    if (entry?.count === points.length && entry.width === width && entry.closed === closed && entry.polished === polished) return entry;
+    const live = liveGeometry.get(points);
+    const path = new Path2D(), lengths = lengthsFor(points,
+      live?.width === width ? live.lengths : [0]), total = lengths.at(-1);
+    if (polished) {
+      entry = { path: polishedOutline(points, width, lengths, total, closed, object.type === "highlight"),
+        width, count: points.length, closed, polished };
+      outlineCache.set(points, entry);
+      return entry;
+    }
+    const taper = object.type === "highlight" || closed || total <= width * 2 ? 0 : total * profile.taperRatio;
+    if (points.length && total < 1e-6) path.addPath(dotGeometry(points.at(-1), width).path);
+    else for (let i = 0; i < points.length - 1; i++) {
+      // Reuse the body built during input. Only the two 8% tapered ends
+      // change at lift; loading an existing stroke builds its vector once.
+      const stable = live?.width === width && lengths[i] >= taper && lengths[i + 1] <= total - taper
+        ? live.segments[i] : null;
+      path.addPath((stable || cubicRibbon(points, i, width, lengths, taper, total)).path);
+    }
+    entry = { path, width, count: points.length, closed, polished };
+    outlineCache.set(points, entry);
+    return entry;
+  }
+
+  function createLiveStroke(object) {
+    let done = 0, previousTail = null;
+    const width = baseWidth(object);
+    let entry = liveGeometry.get(object.points);
+    if (!entry || entry.width !== width) {
+      entry = { width, lengths: [0], segments: [] };
+      liveGeometry.set(object.points, entry);
+    }
+    const lengths = entry.lengths;
+    return {
+      update(preview = null) {
+        const points = object.points, n = points.length;
+        lengthsFor(points, lengths);
+        const stable = new Path2D();
+        let dirty = previousTail;
+        while (done + 2 < n) {
+          const segment = entry.segments[done] || cubicRibbon(points, done, width, lengths);
+          entry.segments[done++] = segment;
+          stable.addPath(segment.path);
+          dirty = unionBounds(dirty, segment.bounds);
+        }
+        const forecast = preview && forecasts.get(preview);
+        const tailPoints = points.slice(Math.max(0, done - 1));
+        if (forecast) tailPoints.push(forecast);
+        const tailLengths = lengthsFor(tailPoints), tail = new Path2D();
+        let tailBounds = null;
+        for (let i = done ? 1 : 0; i < tailPoints.length - 1; i++) {
+          const segment = cubicRibbon(tailPoints, i, width, tailLengths);
+          tail.addPath(segment.path);
+          tailBounds = unionBounds(tailBounds, segment.bounds);
+        }
+        if (n === 1 && !forecast) {
+          const dot = dotGeometry(points[0], width);
+          tail.addPath(dot.path); tailBounds = dot.bounds;
+        }
+        dirty = unionBounds(dirty, tailBounds);
+        previousTail = tailBounds;
+        return { stable, tail, dirty };
+      },
+    };
+  }
+
+  function paint(context, object) {
+    context.save();
+    context.globalAlpha = object.type === "highlight" ? 0.3 : 1;
+    if (object.inkVersion >= 11) context.fill(outlineGeometry(object).path);
+    else if (object.inkVersion === 10) paintV10(context, object);
+    else context.fill(([3, 4, 5, 6, 7, 8, 9].includes(object.inkVersion)
+      ? freehandGeometry(object) : geometry(object)).path);
+    context.restore();
+  }
+
+  const centerline = object => [6, 7, 8, 9].includes(object.inkVersion) && window.RopeInk
+    ? RopeInk.geometry(object, previewSources.get(object.points)).centers
+    : [3, 4, 5].includes(object.inkVersion) ? freehandGeometry(object, true).centers
+      : (object.points || []).map(p => [p.x, p.y, finite(p.p, 1) / 2]);
+  const ropeState = object => [6, 7, 8, 9].includes(object.inkVersion) && window.RopeInk
+    ? RopeInk.state(object) : { anchors: [], lockedCount: 0, spacing: profile.ropeSpacing };
+
+  return { profile, createInput, strokeOptions, centerline, ropeState, previewStroke, paint, invalidate, createLiveStroke };
 })();

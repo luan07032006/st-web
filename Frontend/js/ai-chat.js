@@ -35,7 +35,9 @@
       context.scale(view.z, view.z);
     }
     let pages = visiblePages();
-    if (crop) {
+    if (crop && isWhiteboard()) {
+      pages = [{ ...crop, infinite: true }];
+    } else if (crop) {
       pages = pdfDocumentPages();
       if (!pages.length) {
         const first = Math.max(0, Math.floor((crop.y - paper.top) / (paper.h + paper.gap)));

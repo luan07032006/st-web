@@ -4,26 +4,63 @@
 <head>
     <meta charset="UTF-8">
     <script src="./js/auth.js"></script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#284f7e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Bảng Trắng • Không gian dạy học</title>
     <meta name="description" content="Không gian bảng trắng tương tác cho giảng dạy: vẽ, viết, hình học và đồ thị.">
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23245bea'/%3E%3Cpath d='M9 8h9q8 0 4 8 5 8-4 8H9z' fill='white'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="./css/style.css?v=rounded-handwriting">
+    <link rel="stylesheet" href="./css/tablet.css?v=ipad-workspace-1">
 </head>
 
-<body class="sidebar-collapsed">
-    <header><a class="brand" href="./"><span class="brand-mark">B<span>·</span></span><strong>Bảng
-                Trắng</strong></a><span class="divider"></span>
-        <div class="lesson"><input id="lessonName" aria-label="Tên bài giảng" value="Bài giảng chưa đặt tên"><small
-                id="saveStatus">Đang kết nối máy chủ…</small></div>
-        <div class="header-actions"><button id="toggleSidebar" aria-controls="sidebar" aria-expanded="false">Công cụ / AI</button><button id="exportBtn">↥
-                <span>Xuất ảnh</span></button><button class="primary" id="saveBtn">Lưu PDF</button></div>
-    </header>
-    <nav class="subnav">
-        <div><span class="badge">KHÔNG GIAN DẠY HỌC</span><span class="subtle">Mỗi ý tưởng bắt đầu từ một nét vẽ.</span>
-        </div><button id="focusBtn">⛶ <span>Toàn màn hình</span></button>
-    </nav>
+<body class="sidebar-collapsed" data-workspace-mode="notebook">
+    <div class="top-chrome">
+        <header class="app-header">
+            <a class="brand" href="./" aria-label="Bảng Trắng — trang chủ"><span class="brand-mark">B<span>·</span></span><strong>Bảng Trắng</strong></a>
+            <div class="workspace-tabs" role="tablist" aria-label="Không gian viết">
+                <button type="button" id="whiteboardMode" role="tab" aria-selected="false" data-workspace="whiteboard"><span data-icon="board"></span><span>Bảng viết</span></button>
+                <button type="button" id="notebookMode" role="tab" aria-selected="true" data-workspace="notebook"><span data-icon="notebook"></span><span>Sổ ghi chép</span></button>
+            </div>
+            <div class="lesson"><input id="lessonName" aria-label="Tên tài liệu" value="Sổ ghi chép chưa đặt tên"><small id="saveStatus">Đang kết nối máy chủ…</small></div>
+            <div class="header-actions">
+                <button type="button" id="toggleSidebar" aria-controls="sidebar" aria-expanded="false" title="Mở công cụ toán học và trợ lý AI"><span data-icon="sparkles"></span><span>Công cụ / AI</span></button>
+                <button type="button" id="exportBtn" title="Xuất ảnh PNG" aria-label="Xuất ảnh PNG"><span data-icon="export"></span></button>
+                <button type="button" class="primary" id="saveBtn">Lưu PDF</button>
+                <button type="button" id="focusBtn" title="Mở toàn màn hình" aria-label="Toàn màn hình"><span data-icon="expand"></span><span class="sr-only">Toàn màn hình</span></button>
+            </div>
+        </header>
+        <nav class="toolbar tool-ribbon" id="toolbar" aria-label="Công cụ viết và vẽ">
+            <div id="toolButtons" role="group" aria-label="Công cụ chính"></div>
+            <div class="tool-separator" aria-hidden="true"></div>
+            <div class="insert-tools" role="group" aria-label="Chèn nội dung">
+                <button type="button" id="imageBtn" title="Chèn ảnh hoặc tài liệu" aria-label="Chèn ảnh hoặc tài liệu"><span data-icon="image"></span><span class="tool-caption">Ảnh / file</span></button>
+                <button type="button" id="shapesBtn" title="Hình học và thước" aria-label="Hình học và thước" aria-haspopup="dialog"><span data-icon="shapes"></span><span class="tool-caption">Hình học</span></button>
+                <button type="button" id="formulaQuickBtn" title="Chèn công thức toán học" aria-label="Chèn công thức toán học"><span data-icon="formula"></span><span class="tool-caption">Công thức</span></button>
+            </div>
+            <div class="tool-separator" aria-hidden="true"></div>
+            <div class="board-actions" role="group" aria-label="Dọn nội dung">
+                <button type="button" id="clearInkBtn" aria-label="Xóa nét viết" title="Xóa nét viết và tô sáng"><span data-icon="erase"></span><span class="action-label">Xóa nét</span></button>
+                <button type="button" id="removeFilesBtn" aria-label="Gỡ ảnh / file" title="Gỡ ảnh và tài liệu"><span data-icon="file-x"></span><span class="action-label">Gỡ file</span></button>
+                <button type="button" id="clearBtn" aria-label="Xóa tất cả" title="Xóa tất cả nội dung trong chế độ này"><span data-icon="trash"></span><span class="action-label">Xóa hết</span></button>
+            </div>
+        </nav>
+        <div class="ink-ribbon" aria-label="Thiết lập nét viết">
+            <div id="historySlot"></div>
+            <div class="brush-strip">
+                <span class="brush-label"><span data-icon="pen"></span><span>Nét viết</span></span>
+                <div class="stroke-presets" role="group" aria-label="Độ dày nét viết">
+                    <button type="button" data-pen-size="1.6" aria-label="Nét mảnh" aria-pressed="true" title="Nét mảnh"><i style="--stroke-size:2px"></i></button>
+                    <button type="button" data-pen-size="2.8" aria-label="Nét vừa" aria-pressed="false" title="Nét vừa"><i style="--stroke-size:4px"></i></button>
+                    <button type="button" data-pen-size="4.4" aria-label="Nét đậm" aria-pressed="false" title="Nét đậm"><i style="--stroke-size:6px"></i></button>
+                </div>
+                <div class="ink-divider" aria-hidden="true"></div><div id="penSlot"></div>
+            </div>
+            <div id="pageSlot"></div>
+        </div>
+    </div>
     <main>
         <section class="workspace" id="workspace" aria-label="Tài liệu giấy A4"><canvas id="board"
                 aria-label="Bảng vẽ tương tác"></canvas>
@@ -32,37 +69,17 @@
                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <div class="board-scroll-track"><div class="board-scroll-thumb" id="boardScrollThumb"></div></div>
             </div>
-            <div class="board-label"><span class="tiny-square"></span> GIẤY A4 <span id="objectCount">0 đối
+            <div class="board-label"><span class="tiny-square"></span><span id="workspaceLabel">SỔ GHI CHÉP · A4</span><span id="objectCount">0 đối
                     tượng</span></div>
             <div class="paper-controls" aria-label="Các trang tài liệu">
                 <span id="pageStatus" aria-live="polite">Trang 1 / 1</span>
                 <button type="button" id="paperSettingsBtn" aria-haspopup="dialog" title="Chọn kiểu giấy, màu giấy và xem các trang">▦ Giấy &amp; trang</button>
                 <button type="button" id="addPageBtn" title="Thêm trang A4 ở cuối tài liệu">＋ Thêm trang</button>
             </div>
-            <div class="welcome" id="welcome"><span class="welcome-icon">✎</span>
-                <h1>Bài giảng của bạn,<br>trên từng trang giấy.</h1>
-                <p>Viết tự nhiên trên giấy. Cuộn chuột để chuyển giữa các trang.</p>
-                <div><kbd>B</kbd> Bút vẽ <span>·</span> <kbd>Space</kbd> Di chuyển bảng</div><button id="exampleBtn">Thử
-                    bài giảng mẫu <span>↗</span></button>
-            </div>
-            <div class="toolbar" id="toolbar">
-                <div class="tool-handle" id="toolHandle" title="Kéo để di chuyển thanh công cụ">⠿</div>
-                <div id="toolButtons"></div>
-                <div class="tool-separator"></div><button id="imageBtn" title="Chèn ảnh hoặc tài liệu"
-                    aria-label="Chèn ảnh hoặc tài liệu">▧</button>
-                <div class="board-actions" role="group" aria-label="Dọn nội dung bảng">
-                    <button type="button" id="clearInkBtn" aria-label="Xóa nét viết" title="Xóa nét viết và tô sáng trên tất cả các trang">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 14 8-9a2 2 0 0 1 3 0l5 5-9 10H6zM7 10l7 7M14 20h7"/></svg><span class="action-label">Nét</span>
-                    </button>
-                    <button type="button" id="removeFilesBtn" aria-label="Gỡ ảnh / file" title="Gỡ toàn bộ ảnh và các trang tài liệu đã tải lên">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H5v18h14V9zM13 3v6h6M9 13l6 5M15 13l-6 5"/></svg><span class="action-label">File</span>
-                    </button>
-                    <button type="button" id="clearBtn" aria-label="Xóa tất cả" title="Xóa tất cả nội dung, ảnh, tài liệu và các trang">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg><span class="action-label">Tất cả</span>
-                    </button>
-                </div>
-                <button id="collapseTools" title="Thu gọn thanh công cụ"
-                    aria-label="Thu gọn thanh công cụ">‹</button>
+            <div class="welcome" id="welcome"><span class="welcome-icon" data-icon="pen"></span>
+                <h1 id="welcomeTitle">Một trang mới,<br>một ý tưởng mới.</h1>
+                <p id="welcomeDescription">Viết bằng bút hoặc ngón tay. Chụm hai ngón để thu phóng, kéo hai ngón để di chuyển.</p>
+                <div class="welcome-hints"><span data-icon="gesture"></span> Chụm để thu phóng <span>·</span> Nét viết tự làm mượt</div><button id="exampleBtn">Mở bài giảng mẫu <span>↗</span></button>
             </div>
             <div class="eraser-options" id="eraserOptions" role="group" aria-label="Chế độ tẩy" hidden>
                 <button type="button" data-eraser-mode="stroke" aria-pressed="true">Tẩy nét</button>
@@ -80,6 +97,7 @@
                     <button type="button" id="zoomOut" aria-label="Thu nhỏ giấy" title="Thu nhỏ 10%">−</button>
                     <output id="zoomPercent" aria-live="polite">100%</output>
                     <button type="button" id="zoomIn" aria-label="Phóng to giấy" title="Phóng to 10%">＋</button>
+                    <button type="button" id="fitViewBtn" title="Vừa màn hình" aria-label="Vừa màn hình"><span data-icon="fit"></span></button>
                     <button type="button" id="themeToggle" role="switch" aria-checked="true" aria-label="Bật giao diện sáng" title="Tắt đèn · Chuyển sang giao diện tối">
                         <svg class="theme-lamp" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                             <path class="lamp-bulb" d="M8.5 15.5c0-1.7-2.5-3-2.5-6a6 6 0 0 1 12 0c0 3-2.5 4.3-2.5 6Z" />
@@ -90,16 +108,18 @@
                     </button>
                 </div>
             </div>
+            <div class="gesture-tip"><span data-icon="gesture"></span> Chụm hai ngón để thu phóng</div>
             <div class="selection-note" id="selectionNote" role="status" hidden>Đã chọn vùng trên bảng.
             </div>
         </section>
         <aside id="sidebar">
+            <div class="drawer-heading"><div><strong>Góc trợ giúp</strong><span>Toán học &amp; trợ lý AI</span></div><button type="button" id="closeSidebar" aria-label="Đóng công cụ / AI"><span data-icon="close"></span></button></div>
             <details class="pen-settings">
                 <summary>Bút viết · Màu nét</summary>
                 <div class="pen-options"><span class="option-title">MÀU NÉT</span>
                     <div id="colors"></div><input id="customColor" type="color" value="#24304a"
                         aria-label="Màu tùy chọn">
-                    <p class="ink-hint">Nét mảnh, đầu tròn · Tự làm mượt khi viết.</p>
+                    <p class="ink-hint">Tự nắn mượt khi nhấc bút · Giữ dáng chữ và các vòng nét gốc.</p>
                 </div>
             </details>
             <div class="panel-tabs"><button class="active" data-tab="math">∿ Toán học</button><button data-tab="ai">✧
@@ -190,6 +210,7 @@ x + y <= 4</textarea></div>
     <div id="toast" role="status"></div><input type="file" id="imageInput"
         accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.doc,.docx,.ppt,.pptx" hidden><input type="file" id="importInput"
         accept="application/json,.json" hidden>
+    <dialog id="shapesDialog" aria-labelledby="shapesTitle"><div class="dialog-head"><div><h2 id="shapesTitle">Hình học &amp; thước</h2><p>Chọn một hình rồi kéo trên vùng viết.</p></div><button type="button" id="closeShapes" aria-label="Đóng hình học"><span data-icon="close"></span></button></div><div id="shapesContent"></div></dialog>
     <dialog id="textDialog">
         <form method="dialog">
             <div class="dialog-head">
@@ -245,10 +266,12 @@ x + y <= 4</textarea></div>
     </dialog>
     <script src="./js/vendor/perfect-freehand/index.js?v=1.2.3"></script>
     <script src="./js/rope-ink.js?v=adaptive-ink-8"></script>
-    <script src="./js/ink-engine.js?v=adaptive-ink-8"></script>
-    <script src="./js/app.js?v=adaptive-ink-8"></script>
+    <script src="./js/ink-engine.js?v=form-preserving-ink-3"></script>
+    <script src="./js/rounded-ink.js?v=form-preserving-ink-3"></script>
+    <script src="./js/app.js?v=ipad-workspace-1"></script>
+    <script src="./js/tablet-ui.js?v=ipad-workspace-1"></script>
     <script src="./js/pdf-import.js?v=paper-gallery"></script>
-    <script src="./js/ai-chat.js?v=toolbar-peach"></script>
+    <script src="./js/ai-chat.js?v=ipad-workspace-1"></script>
 </body>
 
 </html>
