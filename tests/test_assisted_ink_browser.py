@@ -106,7 +106,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
         page.evaluate(SETUP)
 
@@ -279,6 +280,7 @@ def run():
         }""")
         assert all(capture[key] for key in ["modelMatches", "stationary", "rawMetadata", "profile", "liftRecorded", "finite"]), capture
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         assert saves[-1]["objects"] == [capture["saved"]], saves[-1]
         print("PASS browser stylus capture runs the assisted model and records actual pressure/time without a lift hook")
 

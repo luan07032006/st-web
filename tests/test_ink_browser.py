@@ -42,7 +42,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
         removed_controls = ["inkStability", "inkPressure", "handwritingScale", "strokeWidth",
                             "decreaseStrokeWidth", "increaseStrokeWidth", "resetView"]
@@ -309,6 +310,7 @@ def run():
         page.evaluate("redo()")
         assert page.evaluate("JSON.parse(JSON.stringify(objects))") == state
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         assert saves[-1]["objects"] == state
         page.evaluate("data=>{validateDoc(data);objects=JSON.parse(JSON.stringify(data.objects));draw()}", saves[-1])
         print("PASS coalesced raw samples, palm rejection, bounded filtered lift, undo/redo and vector save/restore")
@@ -357,6 +359,7 @@ def run():
         assert committed_prediction["storedRaw"][-1]["x"] == 124 and committed_prediction["storedRaw"][-1]["y"] == 300
         assert committed_prediction["storedRaw"][-1]["pressure"] == 0 and committed_prediction["storedRaw"][-1]["t"] == 2072
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         assert saves[-1]["objects"][0]["points"] == json.loads(committed_prediction["actual"])
         assert saves[-1]["objects"][0] == committed_prediction["object"]
         page.evaluate("undo();redo()")

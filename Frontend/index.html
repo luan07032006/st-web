@@ -1,277 +1,61 @@
 <!DOCTYPE html>
 <html lang="vi">
-
 <head>
     <meta charset="UTF-8">
     <script src="./js/auth.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#284f7e">
+    <meta name="theme-color" content="#f7f8f4">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Bảng Trắng • Không gian dạy học</title>
-    <meta name="description" content="Không gian bảng trắng tương tác cho giảng dạy: vẽ, viết, hình học và đồ thị.">
-    <link rel="icon"
-        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23245bea'/%3E%3Cpath d='M9 8h9q8 0 4 8 5 8-4 8H9z' fill='white'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="./css/style.css?v=rounded-handwriting">
-    <link rel="stylesheet" href="./css/tablet.css?v=ipad-workspace-1">
+    <title>Tài liệu • Bảng Trắng</title>
+    <link rel="stylesheet" href="./css/documents.css?v=library-studio-2">
+    <script src="./js/document-store.js?v=library-1" defer></script>
+    <script src="./js/document-ui.js?v=library-studio-2" defer></script>
+    <script src="./js/documents.js?v=library-studio-2" defer></script>
 </head>
-
-<body class="sidebar-collapsed" data-workspace-mode="notebook">
-    <div class="top-chrome">
-        <header class="app-header">
-            <a class="brand" href="./" aria-label="Bảng Trắng — trang chủ"><span class="brand-mark">B<span>·</span></span><strong>Bảng Trắng</strong></a>
-            <div class="workspace-tabs" role="tablist" aria-label="Không gian viết">
-                <button type="button" id="whiteboardMode" role="tab" aria-selected="false" data-workspace="whiteboard"><span data-icon="board"></span><span>Bảng viết</span></button>
-                <button type="button" id="notebookMode" role="tab" aria-selected="true" data-workspace="notebook"><span data-icon="notebook"></span><span>Sổ ghi chép</span></button>
-            </div>
-            <div class="lesson"><input id="lessonName" aria-label="Tên tài liệu" value="Sổ ghi chép chưa đặt tên"><small id="saveStatus">Đang kết nối máy chủ…</small></div>
-            <div class="header-actions">
-                <button type="button" id="toggleSidebar" aria-controls="sidebar" aria-expanded="false" title="Mở công cụ toán học và trợ lý AI"><span data-icon="sparkles"></span><span>Công cụ / AI</span></button>
-                <button type="button" id="exportBtn" title="Xuất ảnh PNG" aria-label="Xuất ảnh PNG"><span data-icon="export"></span></button>
-                <button type="button" class="primary" id="saveBtn">Lưu PDF</button>
-                <button type="button" id="focusBtn" title="Mở toàn màn hình" aria-label="Toàn màn hình"><span data-icon="expand"></span><span class="sr-only">Toàn màn hình</span></button>
-            </div>
-        </header>
-        <nav class="toolbar tool-ribbon" id="toolbar" aria-label="Công cụ viết và vẽ">
-            <div id="toolButtons" role="group" aria-label="Công cụ chính"></div>
-            <div class="tool-separator" aria-hidden="true"></div>
-            <div class="insert-tools" role="group" aria-label="Chèn nội dung">
-                <button type="button" id="imageBtn" title="Chèn ảnh hoặc tài liệu" aria-label="Chèn ảnh hoặc tài liệu"><span data-icon="image"></span><span class="tool-caption">Ảnh / file</span></button>
-                <button type="button" id="shapesBtn" title="Hình học và thước" aria-label="Hình học và thước" aria-haspopup="dialog"><span data-icon="shapes"></span><span class="tool-caption">Hình học</span></button>
-                <button type="button" id="formulaQuickBtn" title="Chèn công thức toán học" aria-label="Chèn công thức toán học"><span data-icon="formula"></span><span class="tool-caption">Công thức</span></button>
-            </div>
-            <div class="tool-separator" aria-hidden="true"></div>
-            <div class="board-actions" role="group" aria-label="Dọn nội dung">
-                <button type="button" id="clearInkBtn" aria-label="Xóa nét viết" title="Xóa nét viết và tô sáng"><span data-icon="erase"></span><span class="action-label">Xóa nét</span></button>
-                <button type="button" id="removeFilesBtn" aria-label="Gỡ ảnh / file" title="Gỡ ảnh và tài liệu"><span data-icon="file-x"></span><span class="action-label">Gỡ file</span></button>
-                <button type="button" id="clearBtn" aria-label="Xóa tất cả" title="Xóa tất cả nội dung trong chế độ này"><span data-icon="trash"></span><span class="action-label">Xóa hết</span></button>
-            </div>
-        </nav>
-        <div class="ink-ribbon" aria-label="Thiết lập nét viết">
-            <div id="historySlot"></div>
-            <div class="brush-strip">
-                <span class="brush-label"><span data-icon="pen"></span><span>Nét viết</span></span>
-                <div class="stroke-presets" role="group" aria-label="Độ dày nét viết">
-                    <button type="button" data-pen-size="1.6" aria-label="Nét mảnh" aria-pressed="true" title="Nét mảnh"><i style="--stroke-size:2px"></i></button>
-                    <button type="button" data-pen-size="2.8" aria-label="Nét vừa" aria-pressed="false" title="Nét vừa"><i style="--stroke-size:4px"></i></button>
-                    <button type="button" data-pen-size="4.4" aria-label="Nét đậm" aria-pressed="false" title="Nét đậm"><i style="--stroke-size:6px"></i></button>
-                </div>
-                <div class="ink-divider" aria-hidden="true"></div><div id="penSlot"></div>
-            </div>
-            <div id="pageSlot"></div>
+<body class="library-page">
+    <a class="skip-library" href="#libraryMain">Đến danh sách tài liệu</a>
+    <aside class="library-sidebar" aria-label="Điều hướng thư viện">
+        <a class="library-brand" href="./index.html" aria-label="Bảng Trắng — trang chủ"><span class="library-mark">B<span>·</span></span><span>Bảng Trắng<small>Ghi lại điều bạn nghĩ.</small></span></a>
+        <div class="sidebar-section-label">KHÔNG GIAN CỦA BẠN</div>
+        <nav class="library-filters" aria-label="Thư viện"><button type="button" data-filter="all" aria-pressed="true" title="Tất cả tài liệu"><span data-library-icon="library"></span><span>Tất cả tài liệu</span><span class="nav-count" id="sidebarDocumentCount">0</span></button><button type="button" data-filter="favorite" aria-pressed="false" title="Tài liệu yêu thích"><span data-library-icon="star"></span><span>Yêu thích</span><span class="nav-count" id="favoriteCount">0</span></button></nav>
+        <div class="sidebar-bottom">
+            <div class="sidebar-note" aria-hidden="true"><span data-library-icon="pen"></span><p>Một trang trống.<br>Một khởi đầu mới.</p><span class="note-line"></span></div>
+            <button type="button" id="storageSettings" class="sidebar-settings" aria-haspopup="dialog"><span data-library-icon="settings"></span><span>Dữ liệu &amp; sao lưu</span></button>
+            <div class="workspace-account"><span class="workspace-avatar" aria-hidden="true">B</span><span>Không gian cá nhân<small>Luôn sẵn sàng để viết.</small></span><span data-library-icon="check"></span></div>
         </div>
-    </div>
-    <main>
-        <section class="workspace" id="workspace" aria-label="Tài liệu giấy A4"><canvas id="board"
-                aria-label="Bảng vẽ tương tác"></canvas>
-            <div class="board-scrollbar" id="boardScroll" role="scrollbar" tabindex="0"
-                aria-label="Cuộn các trang giấy" aria-controls="board" aria-orientation="vertical"
-                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                <div class="board-scroll-track"><div class="board-scroll-thumb" id="boardScrollThumb"></div></div>
+    </aside>
+    <div class="library-shell">
+    <header class="library-header">
+        <div class="library-breadcrumb"><span data-library-icon="home"></span><span>Không gian cá nhân</span><span class="breadcrumb-slash">/</span><strong>Thư viện</strong></div>
+        <div class="library-header-actions"><div id="searchBox" class="search-box"><span data-library-icon="search"></span><input id="searchDocuments" type="search" placeholder="Tìm tài liệu của bạn…" aria-label="Tìm theo tên tài liệu"><button type="button" class="icon-button" id="closeSearch" aria-label="Xóa tìm kiếm"><span data-library-icon="close"></span></button></div><span class="header-avatar" aria-hidden="true">B</span></div>
+    </header>
+    <main class="library-main" id="libraryMain">
+        <div class="library-title-row">
+            <div><p class="eyebrow"><span></span></p><h1>Thư viện <span>của bạn</span> </h1>Nguyễn Quỳnh Hương<p class="library-subtitle"></p></div>
+            <div class="library-actions">
+                <button type="button" class="new-button" id="newDocument" aria-haspopup="dialog"><span data-library-icon="plus"></span>Tài liệu mới<span data-library-icon="chevron"></span></button>
             </div>
-            <div class="board-label"><span class="tiny-square"></span><span id="workspaceLabel">SỔ GHI CHÉP · A4</span><span id="objectCount">0 đối
-                    tượng</span></div>
-            <div class="paper-controls" aria-label="Các trang tài liệu">
-                <span id="pageStatus" aria-live="polite">Trang 1 / 1</span>
-                <button type="button" id="paperSettingsBtn" aria-haspopup="dialog" title="Chọn kiểu giấy, màu giấy và xem các trang">▦ Giấy &amp; trang</button>
-                <button type="button" id="addPageBtn" title="Thêm trang A4 ở cuối tài liệu">＋ Thêm trang</button>
-            </div>
-            <div class="welcome" id="welcome"><span class="welcome-icon" data-icon="pen"></span>
-                <h1 id="welcomeTitle">Một trang mới,<br>một ý tưởng mới.</h1>
-                <p id="welcomeDescription">Viết bằng bút hoặc ngón tay. Chụm hai ngón để thu phóng, kéo hai ngón để di chuyển.</p>
-                <div class="welcome-hints"><span data-icon="gesture"></span> Chụm để thu phóng <span>·</span> Nét viết tự làm mượt</div><button id="exampleBtn">Mở bài giảng mẫu <span>↗</span></button>
-            </div>
-            <div class="eraser-options" id="eraserOptions" role="group" aria-label="Chế độ tẩy" hidden>
-                <button type="button" data-eraser-mode="stroke" aria-pressed="true">Tẩy nét</button>
-                <button type="button" data-eraser-mode="object" aria-pressed="false">Tẩy đối tượng</button>
-            </div>
-            <div class="eraser-options lasso-options" id="lassoOptions" role="group" aria-label="Kiểu khoanh vùng di chuyển" hidden>
-                <button type="button" data-lasso-mode="freeform" aria-pressed="true" title="Giữ chuột hoặc bút và tự vẽ đường khoanh quanh nội dung">⌁ Lasso tự do · Tự khoanh</button>
-                <button type="button" data-lasso-mode="rectangle" aria-pressed="false">▢ Vùng chữ nhật</button>
-            </div>
-            <div class="board-bottom">
-                <div class="history"><button id="undoBtn" aria-label="Hoàn tác"
-                        title="Hoàn tác (Ctrl Z)">↶</button><button id="redoBtn" aria-label="Làm lại"
-                        title="Làm lại (Ctrl Shift Z)">↷</button></div>
-                <div class="zoom">
-                    <button type="button" id="zoomOut" aria-label="Thu nhỏ giấy" title="Thu nhỏ 10%">−</button>
-                    <output id="zoomPercent" aria-live="polite">100%</output>
-                    <button type="button" id="zoomIn" aria-label="Phóng to giấy" title="Phóng to 10%">＋</button>
-                    <button type="button" id="fitViewBtn" title="Vừa màn hình" aria-label="Vừa màn hình"><span data-icon="fit"></span></button>
-                    <button type="button" id="themeToggle" role="switch" aria-checked="true" aria-label="Bật giao diện sáng" title="Tắt đèn · Chuyển sang giao diện tối">
-                        <svg class="theme-lamp" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                            <path class="lamp-bulb" d="M8.5 15.5c0-1.7-2.5-3-2.5-6a6 6 0 0 1 12 0c0 3-2.5 4.3-2.5 6Z" />
-                            <path d="M9 18h6m-5 3h4m-2-5.5V12m-2-2 2 2 2-2" />
-                            <path class="lamp-rays" d="M12 1V0M3 3l1 1M1 9h1m20 0h1m-3-6 1-1" />
-                        </svg>
-                        <span class="theme-switch-track" aria-hidden="true"></span>
-                    </button>
-                </div>
-            </div>
-            <div class="gesture-tip"><span data-icon="gesture"></span> Chụm hai ngón để thu phóng</div>
-            <div class="selection-note" id="selectionNote" role="status" hidden>Đã chọn vùng trên bảng.
-            </div>
-        </section>
-        <aside id="sidebar">
-            <div class="drawer-heading"><div><strong>Góc trợ giúp</strong><span>Toán học &amp; trợ lý AI</span></div><button type="button" id="closeSidebar" aria-label="Đóng công cụ / AI"><span data-icon="close"></span></button></div>
-            <details class="pen-settings">
-                <summary>Bút viết · Màu nét</summary>
-                <div class="pen-options"><span class="option-title">MÀU NÉT</span>
-                    <div id="colors"></div><input id="customColor" type="color" value="#24304a"
-                        aria-label="Màu tùy chọn">
-                    <p class="ink-hint">Tự nắn mượt khi nhấc bút · Giữ dáng chữ và các vòng nét gốc.</p>
-                </div>
-            </details>
-            <div class="panel-tabs"><button class="active" data-tab="math">∿ Toán học</button><button data-tab="ai">✧
-                    Trợ lý AI</button></div>
-            <div class="panel-content" id="mathPanel">
-                <div class="section-heading">
-                    <h2>Công cụ toán học</h2><span class="mini-tag">MATH LAB</span>
-                </div>
-                <p class="intro">Biến những khái niệm thành hình ảnh.</p>
-                <div class="feature-card">
-                    <div class="feature-icon">ƒ<span>x</span></div>
-                    <h3>Khám phá đồ thị</h3>
-                    <p>Nhập hàm số hoặc bất phương trình để biểu diễn miền nghiệm trên bảng.</p>
-                    <label for="graphType">Loại đồ thị</label>
-                    <div class="function-field function-select-wrap">
-                        <select id="graphType" aria-label="Loại đồ thị">
-                            <option value="function">Hàm số y = f(x)</option>
-                            <option value="inequality">Bất phương trình</option>
-                            <option value="inequalitySystem">Hệ bất phương trình</option>
-                            <option value="variation">Bảng biến thiên</option>
-                            <option value="oxy">Hệ trục Oxy (2D)</option>
-                            <option value="oxyz">Hệ trục Oxyz (3D)</option>
-                        </select>
-                    </div>
-                    <label for="functionInput" id="graphInputLabel">Hàm số</label>
-                    <div class="function-field function-input-wrap"><span id="graphPrefix">y =</span><input
-                            id="functionInput" value="x^2 - 3*x + 2" spellcheck="false"
-                            aria-label="Biểu thức hàm số"></div>
-                    <div class="function-field inequality-input-wrap" hidden><span>⇢</span><input id="inequalityInput"
-                            value="y >= x^2 - 3*x + 2" spellcheck="false"
-                            aria-label="Biểu thức bất phương trình"></div>
-                    <div id="inequalitySystemWrap" hidden><textarea id="inequalitySystemInput" rows="4" aria-label="Hệ bất phương trình, mỗi dòng một điều kiện" spellcheck="false">x >= 0
-y >= 0
-x + y <= 4</textarea></div>
-                    <div class="presets" id="graphPresets"><button data-formula="x^2 - 3*x + 2">Bậc hai</button><button
-                            data-formula="sin(x)">sin(x)</button><button data-formula="2*x + 1">Bậc nhất</button></div>
-                    <div class="presets inequality-presets" id="inequalityPresets" hidden>
-                        <button data-inequality="y >= x^2 - 3*x + 2">y ≥ x² − 3x + 2</button>
-                        <button data-inequality="x + y <= 4">x + y ≤ 4</button>
-                        <button data-inequality="x^2 + y^2 <= 16">x² + y² ≤ 16</button>
-                    </div>
-                    <button class="primary wide" id="graphBtn">+ Chèn đồ thị</button>
-                    <p class="field-note" id="graphHint">Hỗ trợ x, y, + − * / ^, sin, cos, tan, sqrt, abs, và các dấu ≤ ≥.</p>
-                </div>
-                <div class="section-heading geometry-heading">
-                    <h3>Hình học</h3><span>VẼ CHÍNH XÁC</span>
-                </div>
-                <div class="geometry-grid">
-                    <button data-tool="line"><b>╱</b>Đường thẳng</button>
-                    <button data-tool="circle"><b>◯</b>Đường tròn</button>
-                    <button data-tool="rectangle"><b>▱</b>Hình chữ nhật</button>
-                    <button data-tool="square"><b>▢</b>Hình vuông</button>
-                    <button data-tool="rightTriangle"><b>⊿</b>Tam giác vuông</button>
-                    <button data-tool="isoscelesTriangle"><b>△</b>Tam giác cân</button>
-                    <button data-tool="equilateralTriangle"><b>△</b>Tam giác đều</button>
-                    <button data-tool="trapezoid"><b aria-hidden="true"></b>Hình thang</button>
-                    <button data-tool="triangle"><b>△</b>Tam giác</button>
-                    <button data-tool="cone"><b>◢</b>Hình nón</button>
-                    <button data-tool="tetrahedron"><b>◈</b>Tứ diện đều</button>
-                    <button data-tool="quadrilateralPyramid"><b>♢</b>Chóp đáy tứ giác</button>
-                    <button data-tool="cube"><b>⬛</b>Hình lập phương</button>
-                    <button data-tool="cuboid"><b>▣</b>Hộp chữ nhật</button>
-                    <button data-tool="cylinder"><b>◫</b>Hình trụ</button>
-                    <button data-tool="ruler"><b>╱╱</b>Thước thẳng</button>
-                    <button data-tool="protractor"><b>◠</b>Thước đo góc</button>
-                </div>
-                <button class="formula-entry" id="formulaBtn"><span>∑</span>
-                    <div><strong>Chèn công thức</strong><small>Soạn ký hiệu toán học</small></div><span>+</span>
-                </button>
-            </div>
-            <div class="panel-content" id="aiPanel" hidden>
-                <section class="ai-chat" aria-label="Chat với AI">
-                    <button type="button" id="aiRegionBtn" class="primary wide">✧ Khoanh vùng bài toán để AI giải</button>
-                    <p id="aiRegionNote" hidden>Đang hỏi về vùng đã khoanh. <button type="button" id="clearAIRegion">Dùng toàn bảng</button></p>
-                    <div id="aiChatMessages" class="ai-chat-messages" role="log" aria-live="polite">
-                    </div>
-                    <form id="aiChatForm">
-                        <textarea id="aiChatInput" aria-label="Tin nhắn cho AI" rows="3" maxlength="4000" placeholder="Nhập câu hỏi của bạn…" required></textarea>
-                        <div class="ai-chat-controls"><small>Enter để gửi · Shift + Enter xuống dòng</small><button type="submit" id="sendChatBtn">Gửi ↑</button></div>
-                    </form>
-                    <p id="aiChatStatus" role="status"></p>
-                </section>
-            </div>
-        </aside>
+        </div>
+        <button type="button" class="resume-document" id="resumeDocument" hidden><span class="resume-icon" id="resumeIcon" data-library-icon="notebook"></span><span class="resume-copy"><small>TIẾP TỤC TỪ NƠI BẠN DỪNG</small><strong id="resumeDocumentTitle"></strong></span><span class="resume-label">Mở tài liệu<span data-library-icon="arrow"></span></span></button>
+        <div class="library-section-heading"><h2 id="librarySectionTitle">Tất cả tài liệu <span id="sectionDocumentCount">0</span></h2><div class="library-view-options"><label class="sort-control"><span class="sr-only">Sắp xếp tài liệu</span><span data-library-icon="sort"></span><select id="sortDocuments"><option value="updated">Sửa gần đây</option><option value="created">Ngày tạo</option><option value="title">Tên tài liệu</option></select><span data-library-icon="chevron"></span></label><div class="library-view-switch" role="group" aria-label="Kiểu hiển thị"><button type="button" data-library-view="grid" aria-label="Dạng lưới" aria-pressed="true" title="Dạng lưới"><span data-library-icon="grid"></span></button><button type="button" data-library-view="list" aria-label="Dạng danh sách" aria-pressed="false" title="Dạng danh sách"><span data-library-icon="list"></span></button></div></div></div>
+        <div class="library-filter-row">
+            <div class="document-type-filters" role="group" aria-label="Loại tài liệu"><button type="button" data-kind-filter="all" aria-pressed="true">Tất cả <span id="documentCount">0</span></button><button type="button" data-kind-filter="notebook" aria-pressed="false"><span data-library-icon="notebook"></span>Sổ ghi chép</button><button type="button" data-kind-filter="whiteboard" aria-pressed="false"><span data-library-icon="board"></span>Bảng viết</button></div>
+            <span class="library-selection-label" id="libraryResultLabel"></span>
+        </div>
+        <section class="document-grid" id="documentGrid" aria-label="Các tài liệu"></section>
+        <section class="library-empty" id="libraryEmpty" hidden><div class="empty-illustration" data-library-icon="notebook"></div><h2>Trang đầu tiên của bạn</h2><p>Tạo một cuốn sổ để ghi chép, hoặc mở bảng viết cho những ý tưởng không giới hạn.</p><button type="button" class="new-button" id="createFirst"><span data-library-icon="plus"></span>Tạo tài liệu đầu tiên</button></section>
+        <p id="noSearchResults" class="no-results" hidden>Không tìm thấy tài liệu phù hợp.</p>
     </main>
-    <footer><span id="toolStatus">Bút vẽ · Kéo trên bảng để viết</span><span>Không gian vô tận, cảm hứng không giới hạn
-            <span class="footer-spark">✧</span></span></footer>
-    <div id="toast" role="status"></div><input type="file" id="imageInput"
-        accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.doc,.docx,.ppt,.pptx" hidden><input type="file" id="importInput"
-        accept="application/json,.json" hidden>
-    <dialog id="shapesDialog" aria-labelledby="shapesTitle"><div class="dialog-head"><div><h2 id="shapesTitle">Hình học &amp; thước</h2><p>Chọn một hình rồi kéo trên vùng viết.</p></div><button type="button" id="closeShapes" aria-label="Đóng hình học"><span data-icon="close"></span></button></div><div id="shapesContent"></div></dialog>
-    <dialog id="textDialog">
-        <form method="dialog">
-            <div class="dialog-head">
-                <h2 id="textTitle">Chèn văn bản</h2><button value="cancel" aria-label="Đóng">×</button>
-            </div>
-            <p id="textHelp">Nhập nội dung, sau đó nhấn Chèn.</p><textarea id="textValue" rows="4"
-                placeholder="Nội dung bài giảng..."></textarea>
-            <div id="symbols" hidden></div>
-            <div class="text-options">
-                <label for="textSize">Cỡ chữ (px)<input id="textSize" type="number" min="8" max="200" step="1" value="24" required></label>
-                <label for="textColor">Màu chữ<input id="textColor" type="color" value="#245bea"></label>
-            </div>
-            <p>Sau khi chèn, kéo chữ để di chuyển; kéo nút ở góc để đổi cỡ chữ. Nhấp đúp vào chữ để sửa.</p>
-            <div class="dialog-actions"><button value="cancel">Hủy</button><button id="insertText" class="primary"
-                    value="default">Chèn lên bảng</button></div>
-        </form>
+    <footer class="library-footer"><span class="library-status-dot" aria-hidden="true"></span><span class="library-status" id="libraryStatus" role="status">Đang mở thư viện…</span><span class="library-footer-note">Từng ý tưởng đều đáng được giữ lại.</span></footer>
+    </div>
+    <dialog id="newDocumentDialog" class="library-dialog" aria-labelledby="newDocumentTitle">
+        <div class="library-dialog-heading"><div><p class="eyebrow">BẮT ĐẦU MỘT Ý TƯỞNG</p><h2 id="newDocumentTitle">Bạn muốn tạo gì?</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="Đóng"><span data-library-icon="close"></span></button></div>
+        <label class="document-name-label" for="newDocumentName">Tên tài liệu</label><input class="document-name-input" id="newDocumentName" maxlength="200" placeholder="Đặt tên hoặc để trống…" autocomplete="off">
+        <div class="new-document-choices"><button type="button" data-create-kind="notebook"><span class="choice-art choice-notebook" data-library-icon="notebook"></span><strong>Sổ ghi chép</strong><span>Trang A4, có lề và nhiều kiểu giấy.</span><span class="choice-link">Tạo sổ <span data-library-icon="arrow"></span></span></button><button type="button" data-create-kind="whiteboard"><span class="choice-art choice-board" data-library-icon="board"></span><strong>Bảng viết</strong><span>Không gian rộng mở, kéo và thu phóng tự do.</span><span class="choice-link">Tạo bảng <span data-library-icon="arrow"></span></span></button></div>
+        <p class="dialog-status" id="newDocumentStatus" role="status"></p>
     </dialog>
-    <dialog id="paperDialog" aria-labelledby="paperDialogTitle">
-        <div class="dialog-head">
-            <h2 id="paperDialogTitle">Giấy &amp; trang</h2>
-            <button type="button" id="closePaperDialog" aria-label="Đóng bảng chọn giấy">×</button>
-        </div>
-        <div class="paper-tabs" role="tablist" aria-label="Cài đặt giấy">
-            <button type="button" id="paperTemplatesTab" role="tab" aria-selected="true" aria-controls="paperTemplatesPanel">Kiểu giấy</button>
-            <button type="button" id="paperPagesTab" role="tab" aria-selected="false" aria-controls="paperPagesPanel" tabindex="-1">Các trang</button>
-        </div>
-        <section id="paperTemplatesPanel" role="tabpanel" aria-labelledby="paperTemplatesTab">
-            <div class="paper-options">
-                <span class="paper-format">A4 · 210 × 297 mm</span>
-                <label for="paperColorPreset">Màu giấy</label>
-                <select id="paperColorPreset">
-                    <option value="#faf8e8">Vàng kem</option>
-                    <option value="#ffffff">Trắng</option>
-                    <option value="#252a32">Tối</option>
-                    <option value="#eef5ed">Xanh nhạt</option>
-                    <option value="#fceef1">Hồng nhạt</option>
-                    <option value="custom">Tùy chỉnh</option>
-                </select>
-                <input type="color" id="paperCustomColor" value="#faf8e8" aria-label="Màu giấy tùy chỉnh">
-            </div>
-            <p class="paper-hint">Chọn mẫu bên dưới. Kiểu và màu giấy áp dụng cho tất cả trang A4.</p>
-            <div id="paperTemplateGrid" class="paper-template-grid" role="group" aria-label="Các mẫu giấy"></div>
-        </section>
-        <section id="paperPagesPanel" role="tabpanel" aria-labelledby="paperPagesTab" hidden>
-            <p class="paper-hint">Chọn một trang để chuyển đến và tiếp tục viết.</p>
-            <div id="paperPageGrid" class="paper-page-grid"></div>
-            <button type="button" id="galleryAddPage">＋ Thêm trang A4</button>
-        </section>
-        <div class="dialog-actions paper-dialog-actions">
-            <button type="button" id="cancelPaperSettings">Hủy</button>
-            <button type="button" id="applyPaperSettings" class="primary">Áp dụng</button>
-        </div>
-    </dialog>
-    <script src="./js/vendor/perfect-freehand/index.js?v=1.2.3"></script>
-    <script src="./js/rope-ink.js?v=adaptive-ink-8"></script>
-    <script src="./js/ink-engine.js?v=form-preserving-ink-3"></script>
-    <script src="./js/rounded-ink.js?v=form-preserving-ink-3"></script>
-    <script src="./js/app.js?v=ipad-workspace-1"></script>
-    <script src="./js/tablet-ui.js?v=ipad-workspace-1"></script>
-    <script src="./js/pdf-import.js?v=paper-gallery"></script>
-    <script src="./js/ai-chat.js?v=ipad-workspace-1"></script>
+    <dialog id="renameDialog" class="library-dialog small-dialog" aria-labelledby="renameTitle"><form id="renameForm"><div class="library-dialog-heading"><h2 id="renameTitle">Đổi tên tài liệu</h2><button type="button" class="icon-button" data-close-dialog aria-label="Đóng"><span data-library-icon="close"></span></button></div><label class="sr-only" for="renameInput">Tên mới</label><input class="document-name-input" id="renameInput" maxlength="200" required><div class="dialog-actions"><button type="button" data-close-dialog>Hủy</button><button class="new-button" type="submit">Lưu tên</button></div><p class="dialog-status" id="renameStatus" role="status"></p></form></dialog>
+    <dialog id="storageDialog" class="library-dialog small-dialog" aria-labelledby="storageTitle"><div class="library-dialog-heading"><h2 id="storageTitle">Dữ liệu của bạn</h2><button type="button" class="icon-button" data-close-dialog aria-label="Đóng"><span data-library-icon="close"></span></button></div><p>Tài liệu được lưu trên thiết bị và tự lưu thêm vào máy chủ local khi kết nối được. Đóng app hay đăng nhập lại sẽ không xóa tài liệu.</p><p class="storage-note">Bản trên thiết bị gắn với trình duyệt và địa chỉ web đang dùng. Sao lưu để giữ thêm một bản độc lập.</p><div class="storage-actions"><button type="button" id="backupLibrary"><span data-library-icon="download"></span>Sao lưu tất cả</button><button type="button" id="restoreLibrary"><span data-library-icon="upload"></span>Khôi phục từ bản sao lưu</button></div><p class="dialog-status" id="storageStatus" role="status"></p><input type="file" id="restoreLibraryInput" accept="application/json,.json" hidden></dialog>
+    <div id="libraryToast" role="status"></div>
 </body>
-
 </html>

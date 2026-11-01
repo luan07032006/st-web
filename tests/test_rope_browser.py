@@ -37,7 +37,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
         current_version = page.evaluate("InkEngine.profile.version")
         assert current_version >= 8
@@ -316,6 +317,7 @@ def run():
         assert captured["saved"]["points"][-1]["p"] == captured["saved"]["points"][-2]["p"], captured
         assert captured["saved"]["inkVersion"] == current_version, captured
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         assert saves[-1]["objects"][0] == captured["saved"]
         page.evaluate("undo();redo()")
         assert page.evaluate("JSON.parse(JSON.stringify(objects[0]))") == captured["saved"]

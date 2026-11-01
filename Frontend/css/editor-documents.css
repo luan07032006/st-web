@@ -1,0 +1,29 @@
+.document-editor .app-header { gap:12px; }
+.document-editor .app-header .brand strong { display:none; }
+.document-editor .document-tabs { flex:1; min-width:0; width:auto; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#ffffff40 transparent; padding-top:8px; align-items:stretch; }
+.document-tab { display:flex; align-items:center; flex:none; position:relative; min-width:130px; max-width:230px; background:transparent; border-radius:12px 12px 0 0; }
+.document-tab:has([aria-selected="true"]) { background:var(--ribbon); }
+.document-editor .document-tab button[role="tab"] { display:flex; align-items:center; height:100%; min-height:44px; min-width:0; max-width:190px; width:auto; border-radius:12px 0 0 0; padding:0 10px 0 14px; gap:8px; background:transparent; font-size:13px; }
+.document-tab button[role="tab"] span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.document-tab .library-icon { width:20px; height:20px; flex:none; }
+.document-editor .document-tab .close-document-tab { display:flex; align-items:center; justify-content:center; width:44px; min-width:44px; height:44px; padding:0; margin:0 2px 0 0; background:transparent; border:0; color:#d8e5f4; border-radius:10px; }
+.document-tab .close-document-tab svg { width:16px; height:16px; }
+.document-editor .new-tab-button { width:44px; height:44px; min-width:44px; padding:0; color:#fff; font-size:24px; background:#ffffff10; border:1px solid #ffffff28; border-radius:12px; flex:none; }
+.document-editor .app-header .lesson { max-width:180px; flex:0 1 180px; }
+.document-editor .lesson input { font-size:16px; }
+.document-editor #saveStatus { white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.document-editor .library-dialog { --lib-panel:var(--panel); --lib-ink:var(--ink); --lib-muted:var(--muted); --lib-border:var(--border); --lib-blue:var(--blue); }
+.document-editor .library-dialog .new-document-choices button { background:var(--surface); }
+.document-editor .library-dialog button:hover { background:var(--surface-strong); }
+.document-editor .library-dialog-heading button { color:var(--ink); }
+.document-editor #workspace[aria-busy="true"] { pointer-events:none; opacity:.7; }
+.document-save-indicator { position:absolute; right:20px; bottom:25px; z-index:6; padding:5px 10px; border-radius:8px; color:var(--muted); background:var(--panel); border:1px solid var(--border); font-size:10px; pointer-events:none; max-width:calc(100% - 250px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.document-editor .gesture-tip { bottom:29px; }
+@media (max-width:1200px) { .document-editor .app-header .lesson { display:none; } .document-editor .document-tab { max-width:210px; } .document-save-indicator { right:16px; bottom:16px; } .document-editor .gesture-tip { display:none; } }
+@media (max-width:740px) {
+    .document-editor .app-header { gap:8px; padding-top:8px; padding-bottom:0; }
+    .document-editor .document-tabs { order:2; width:calc(100% - 52px); flex-basis:calc(100% - 52px); min-height:48px; padding-top:0; }
+    .document-editor .new-tab-button { order:3; align-self:center; }
+    .document-editor .document-tab { max-width:210px; min-width:130px; }
+    .document-save-indicator { display:none; }
+}

@@ -38,7 +38,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof boardW!=='undefined' && boardW>0 && document.querySelector('#historySlot #undoBtn')")
         page.evaluate("""() => {
           canvas.setPointerCapture=()=>{};
@@ -103,7 +104,7 @@ def run():
           $('lessonName').value='Sổ của tôi';
           window.notebookInk=JSON.stringify(objects);
         }""")
-        page.locator("#whiteboardMode").click()
+        page.evaluate("setWorkspaceMode('whiteboard')")
         assert page.evaluate("objects.length===0 && workspaceMode==='whiteboard' && visiblePages()[0].infinite")
         assert not page.locator("#addPageBtn").is_visible()
         # Write outside all A4 bounds, including negative world coordinates.
@@ -113,9 +114,9 @@ def run():
           window.boardInk=JSON.stringify(objects);window.boardView=JSON.stringify(view);
         }""")
         assert page.evaluate("objects[0].points.every(p=>p.x<0 && p.y<0)")
-        page.locator("#notebookMode").click()
+        page.evaluate("setWorkspaceMode('notebook')")
         assert page.evaluate("JSON.stringify(objects)===notebookInk && $('lessonName').value==='Sổ của tôi'")
-        page.locator("#whiteboardMode").click()
+        page.evaluate("setWorkspaceMode('whiteboard')")
         assert page.evaluate("JSON.stringify(objects)===boardInk && JSON.stringify(view)===boardView && $('lessonName').value==='Ý tưởng của tôi'")
         page.evaluate("undo()")
         assert page.evaluate("objects.length===0")
@@ -160,7 +161,7 @@ def run():
         layout(1194, 834, "whiteboard-landscape")
         page.evaluate("applyTheme('dark')")
         layout(1194, 834, "whiteboard-dark")
-        page.locator("#notebookMode").click()
+        page.evaluate("setWorkspaceMode('notebook')")
         layout(1194, 834, "notebook-dark")
         page.evaluate("applyTheme('light')")
         # A notebook pinch must also preserve its midpoint, without moving/reshaping stored strokes.
@@ -174,17 +175,19 @@ def run():
         }""")
         print("PASS pinch zoom anchors both modes, two-finger panning creates no ink, trackpad zoom and 10–400% limits")
 
-        page.locator("#whiteboardMode").click()
+        page.evaluate("setWorkspaceMode('whiteboard')")
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         page.wait_for_function("$('saveStatus').textContent.includes('Đã lưu')")
-        assert saves[-1]["workspaceMode"] == "whiteboard" and saves[-1]["alternateWorkspace"]["document"]["title"] == "Sổ của tôi"
+        assert saves[-1]["workspaceMode"] == "whiteboard"
+        assert len({item["documentId"] for item in saves}) >= 2
         saved = page.evaluate("JSON.stringify(lessonData())")
         page.reload()
         page.wait_for_function("typeof boardW!=='undefined' && boardW>0 && workspaceMode==='whiteboard'")
         assert page.evaluate("JSON.stringify(objects)") == json.dumps(json.loads(saved)["objects"], separators=(",", ":"), ensure_ascii=False)
-        page.locator("#notebookMode").click()
+        page.evaluate("setWorkspaceMode('notebook')")
         assert page.evaluate("$('lessonName').value==='Sổ của tôi' && objects.length===1")
-        page.locator("#whiteboardMode").click()
+        page.evaluate("setWorkspaceMode('whiteboard')")
         export = page.evaluate("""async () => {
           const rect=whiteboardContentPage();const output=renderPaperPage(rect);
           const pdf=await exportLessonPDF();

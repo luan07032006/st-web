@@ -37,7 +37,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof RoundedInk !== 'undefined' && boardW > 0")
         page.evaluate("""() => {
           canvas.setPointerCapture=()=>{};
@@ -281,6 +282,8 @@ def run():
             unselected:JSON.stringify(objects[1])===otherBefore,changed:before!==after,saved:JSON.parse(after)};
         }""")
         assert all(integration[k] for k in ["metadata", "legacy", "undoFixed", "redoFixed", "reload", "raw", "unselected", "changed"]), integration
+        page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         assert .05 < integration["pressure"] < .65, integration
         page.wait_for_function("document.getElementById('saveStatus').textContent.includes('Đã lưu')")
         assert saves[-1]["objects"] == integration["saved"], saves[-1]

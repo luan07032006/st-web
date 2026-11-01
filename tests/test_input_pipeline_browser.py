@@ -60,7 +60,8 @@ def run():
         def prepare(target):
             target.add_init_script("sessionStorage.setItem('qh-authenticated', 'true')")
             target.route("**/*", serve)
-            target.goto("http://localhost/index.html")
+            target.goto("http://localhost/editor.html")
+            target.evaluate("documentReady")
             target.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
             target.evaluate(SETUP)
 
@@ -196,6 +197,7 @@ def run():
         assert captured["movingLag"] < 1, captured
         assert captured["saved"]["inkVersion"] == 8 and captured["moving"]["inkVersion"] == 8
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         assert saves[-1]["objects"] == [captured["saved"], captured["moving"], captured["dwell"]], saves[-1]
         page.evaluate("undo();redo()")
         assert page.evaluate("JSON.parse(JSON.stringify(objects))") == [captured["saved"], captured["moving"], captured["dwell"]]

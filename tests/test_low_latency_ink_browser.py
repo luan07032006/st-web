@@ -36,7 +36,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
         page.evaluate("""() => {
           canvas.setPointerCapture=()=>{};
@@ -117,6 +118,7 @@ def run():
         assert acquisition["raw"][-1][:4] == [130, 233, 1024, 0], acquisition
         assert all(point["x"] <= 130 for point in acquisition["saved"]["points"]), acquisition
         page.evaluate("saveLesson()")
+        page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")
         page.wait_for_function("document.getElementById('saveStatus').textContent.includes('Đã lưu')")
         assert saves[-1]["objects"] == [acquisition["saved"]], saves
         replay = page.evaluate("""() => {
@@ -258,7 +260,8 @@ def run():
         fallback_page.on("pageerror", lambda error: errors.append(str(error)))
         fallback_page.add_init_script("sessionStorage.setItem('qh-authenticated', 'true');window.OffscreenCanvas=undefined")
         fallback_page.route("**/*", serve)
-        fallback_page.goto("http://localhost/index.html")
+        fallback_page.goto("http://localhost/editor.html")
+        fallback_page.evaluate("documentReady")
         fallback_page.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
         compatibility = fallback_page.evaluate("""async () => {
           canvas.setPointerCapture=()=>{};objects=[];view.z=.5;draw();

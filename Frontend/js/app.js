@@ -94,16 +94,8 @@ let boardH = 0;
 
 let toastTimer;
 let saveTimer;
-let saveQueue = Promise.resolve();
-let saveRevision = 0;
 let restoringLesson = false;
 let fileImportRevision = 0;
-const sessionLessonKey = "bangtrang-session-v1";
-let boardSessionId = crypto.randomUUID();
-try {
-  boardSessionId = sessionStorage.getItem("qh-board-session") || boardSessionId;
-  sessionStorage.setItem("qh-board-session", boardSessionId);
-} catch { /* Keep a fresh board when browser storage is unavailable. */ }
 
 const images = new Map();
 const expressionCache = new Map();
@@ -315,16 +307,13 @@ function changed({ deferDraw = false } = {}) {
   if (deferDraw) requestInkSceneDraw();
   else draw();
 
-  $("saveStatus").textContent = "Đang lưu trên máy chủ…";
-
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveLesson, 600);
+  $("saveStatus").textContent = "Đang lưu tài liệu…";
+  saveLesson();
 }
 
 function currentDocumentData() {
   return {
       version: 1,
-      sessionId: boardSessionId,
       objects,
       view,
       title: $("lessonName").value,
@@ -335,6 +324,7 @@ function currentDocumentData() {
 }
 
 function lessonData() {
+  if (window.DocumentStore) return { ...currentDocumentData(), workspaceMode };
   const alternateMode = isWhiteboard() ? "notebook" : "whiteboard";
   return { ...currentDocumentData(), workspaceMode,
     alternateWorkspace: { mode: alternateMode, document: workspaceDocuments[alternateMode] } };
@@ -367,6 +357,7 @@ function syncWorkspaceUI() {
 }
 
 function setWorkspaceMode(mode) {
+  if (window.documentWorkspace?.ready) return window.documentWorkspace.openKind(mode);
   if (!["notebook", "whiteboard"].includes(mode) || mode === workspaceMode) return;
   if (start?.groupMove) finishGroupMove(true);
   clearBoardInteraction();
@@ -389,49 +380,9 @@ document.querySelectorAll("[data-workspace]").forEach(button => {
   button.onclick = () => setWorkspaceMode(button.dataset.workspace);
 });
 
-async function saveLesson() {
-  if (restoringLesson) return false;
-
-  const revision = ++saveRevision;
-  const serialized = JSON.stringify(lessonData());
-  let cached = false;
-  try {
-    sessionStorage.setItem("qh-board-started", boardSessionId);
-    sessionStorage.setItem(sessionLessonKey, serialized);
-    cached = true;
-  } catch {
-    // A failed quota write must not leave an older session cache to restore.
-    try { sessionStorage.removeItem(sessionLessonKey); } catch { /* Storage unavailable. */ }
-  }
-  saveQueue = saveQueue.catch(() => false).then(async () => {
-    try {
-      const response = await fetch("/api/lesson", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: serialized,
-      });
-
-      if (!response.ok) throw new Error("Server save failed");
-
-      if (revision === saveRevision) {
-        const time = new Date().toLocaleTimeString("vi-VN", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        $("saveStatus").textContent = `Đã lưu trên máy chủ · ${time}`;
-      }
-      return true;
-    } catch {
-      if (revision === saveRevision) {
-        $("saveStatus").textContent = cached
-          ? "Máy chủ chưa sẵn sàng · Đã lưu trong phiên đăng nhập này"
-          : "Không thể lưu · Hãy tải bài giảng PDF về";
-      }
-      return false;
-    }
-  });
-
-  return saveQueue;
+function saveLesson() {
+  if (restoringLesson || !window.documentWorkspace?.ready) return Promise.resolve(false);
+  return window.documentWorkspace.save();
 }
 
 function undo() {
@@ -460,7 +411,8 @@ function redo() {
 
 $("undoBtn").onclick = undo;
 $("redoBtn").onclick = redo;
-$("lessonName").onchange = saveLesson;
+$("lessonName").maxLength = 200;
+$("lessonName").onchange = $("lessonName").oninput = saveLesson;
 
 // =====================================================
 // 4. TỌA ĐỘ VÀ KÍCH THƯỚC CANVAS
@@ -2352,6 +2304,7 @@ function rollbackTouchEdit() {
 }
 
 canvas.onpointerdown = (event) => {
+  if (window.DocumentStore && !window.documentWorkspace?.ready) return;
   if (event.pointerType === "pen" && (paperGesture || (dragging && start?.pointerType === "touch"))) {
     if (start?.groupMove) finishGroupMove(true);
     rollbackTouchEdit();
@@ -5447,8 +5400,8 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
 
 function updateFocusButton() {
   const focused = document.body.classList.contains("focus");
-  $("focusBtn").querySelector(".sr-only").textContent = focused ? "Tho?t to?n m?n h?nh" : "To?n m?n h?nh";
-  $("focusBtn").setAttribute("aria-label", focused ? "Tho?t to?n m?n h?nh" : "To?n m?n h?nh");
+  $("focusBtn").querySelector(".sr-only").textContent = focused ? "Thoát toàn màn hình" : "Toàn màn hình";
+  $("focusBtn").setAttribute("aria-label", focused ? "Thoát toàn màn hình" : "Toàn màn hình");
   $("focusBtn").setAttribute("aria-pressed", String(focused));
 }
 $("focusBtn").onclick = async () => {
@@ -5566,8 +5519,8 @@ window.addEventListener("keydown", (event) => {
     $("selectionNote").hidden = true;
     document.body.classList.remove("focus");
 
-    $("focusBtn").querySelector("span").textContent =
-      "Toàn màn hình";
+    updateFocusButton();
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
 
     draw();
   }
@@ -5609,49 +5562,8 @@ window.addEventListener("blur", () => {
 // 21. KHÔI PHỤC BÀI GIẢNG ĐÃ LƯU
 // =====================================================
 
-async function initializeLesson() {
-  let loaded = false;
-  let resumeSession = false;
-  try {
-    resumeSession = sessionStorage.getItem("qh-board-started") === boardSessionId;
-    const cached = sessionStorage.getItem(sessionLessonKey);
-    if (resumeSession && cached) {
-      const data = validateDoc(JSON.parse(cached));
-      if (data.sessionId === boardSessionId) {
-        restoringLesson = true;
-        applyDoc(data);
-        loaded = true;
-      }
-    }
-  } catch { /* Try the server copy belonging to this login session. */ }
-  finally { restoringLesson = false; }
+// The document controller restores an IDB/server record independently of login sessions.
 
-  if (resumeSession && !loaded) {
-    try {
-      const response = await fetch("/api/lesson", { cache: "no-store" });
-      if (response.ok) {
-        const data = validateDoc(await response.json());
-        // A new login must never restore a previous login's shared server lesson.
-        if (data.sessionId === boardSessionId) {
-          restoringLesson = true;
-          applyDoc(data);
-          loaded = true;
-        }
-      }
-    } catch { /* Start blank if this session has no usable saved copy. */ }
-    finally { restoringLesson = false; }
-  }
-
-  syncWorkspaceUI();
-  resize();
-  draw();
-  $("saveStatus").textContent = loaded
-    ? "Đã khôi phục bảng trong phiên đăng nhập này"
-    : "Phiên đăng nhập mới · Bảng trống";
-  saveLesson();
-}
-
-initializeLesson();
 
 // =====================================================
 // 22. WEBMCP — CHỈ ĐĂNG KÝ NẾU TRÌNH DUYỆT HỖ TRỢ

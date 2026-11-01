@@ -10,6 +10,9 @@ mvn -f Backend/pom.xml compile exec:java
 
 Open `http://localhost:8080`. The Java server serves the frontend and exposes:
 
+- `GET /api/documents` to list saved documents (metadata and cover previews)
+- `GET /api/documents/{id}` to reopen a specific notebook or whiteboard
+- `PUT /api/documents/{id}` to atomically save a document, rejecting older revisions
 - `GET /api/lesson` to load the saved lesson
 - `PUT /api/lesson` to validate and save the current lesson
 - `GET /api/ai/status` to check whether an API key is configured
@@ -61,9 +64,48 @@ terminal to retain session environment variables. Refresh the browser. The API
 status endpoint includes the backend version for diagnostics.
 Compiling files alone does not update a running Java process.
 
-The server stores one shared lesson in `Backend/data/lesson.json`, accepts JSON
-documents up to 32 MB, and binds to loopback only. This is local persistence,
-not multi-user or cloud storage.
+The home page is `Frontend/index.html`; the writing workspace is
+`Frontend/editor.html?document=<id>`. **Mới** creates an independent notebook or
+whiteboard. Open documents appear as separate tabs; closing a tab does not delete
+the document. The library supports names, favorites, search, sorting and editable
+JSON backup/restore. Restoring a backup creates new documents, preserving existing ones.
+
+Every completed edit starts an IndexedDB write immediately. This store survives
+closing the browser and fresh logins; sessionStorage is used only for the existing
+demo login. Tab changes and returning home wait for the local write to complete.
+Visibility/page-hide events also flush the current work. Saved covers, paper settings,
+page counts, view transforms, raw pen samples, geometry and imported images belong
+to their document. Undo histories are kept independently for open tabs.
+
+The server stores each document in `Backend/data/documents/<id>.json`, using an
+atomic file replacement. No separate database installation is required. Local
+edits are saved even if the server is unavailable; pending copies retry on reopening
+and when the browser comes online. Status text distinguishes local saving from
+successful server saving. Files accept up to 32 MB per document. The old
+`Backend/data/lesson.json` is read only for a one-time migration, splitting its
+notebook and whiteboard into separate documents without changing the original.
+Migration IDs are stable across browsers to avoid duplicate imports.
+
+`BOARD_DATA_DIR` optionally sets the data directory (the default is `Backend/data`).
+Retain or back up this directory across deployments; container deployments need a
+persistent volume. The server binds to loopback by default; this is the existing
+single-user local app, not cloud/account synchronization. IndexedDB belongs to the
+current browser and web origin; clearing website data removes the device copy.
+The server copy and downloadable JSON backups provide independent recovery.
+
+Restart the backend once after this update to enable `/api/documents`. If Maven is
+not on PATH but the dependencies already exist in `Backend/target/lasso-dependencies`,
+the current Windows development workspace can be compiled and run with:
+
+```powershell
+javac --release 21 -encoding UTF-8 -cp "Backend/target/lasso-dependencies/*" -d Backend/target/classes Backend/src/main/java/vn/bangtrang/backend/Main.java
+java -cp "Backend/target/classes;Backend/target/lasso-dependencies/*" vn.bangtrang.backend.Main
+```
+
+Run `python tests/test_document_library_browser.py` for isolated real-server and
+persistent-browser tests, including full browser closure, fresh login, network
+failure, server restart, recovery in a new browser, legacy migration and revision
+conflicts. Test data and browser profiles are created in temporary directories.
 
 The insert image/document button opens PDFs in a document view using
 the locally bundled PDF.js library. Pen, highlight, undo, lesson saving, and
@@ -83,11 +125,11 @@ ruled paper with a decorative margin. Select a paper color or use the custom
 color picker, then **Áp dụng** to update all A4 sheets. The **Các trang** tab
 shows thumbnails for navigation and adding pages; imported PDF pages keep their
 original appearance. Use **Thêm trang** or scroll toward the bottom to keep extending the
-document. Page count, paper appearance, and position are saved within the login session;
+document. Page count, paper appearance, and position are saved permanently per document;
 undo/redo also restores page additions and paper settings. Pages automatically fit
 the available width with at most 100% magnification. Scroll between pages; drag
-with the hand tool or Space to pan. Two-finger gestures pan without changing
-magnification, and Shift + wheel scrolls horizontally. Only visible sheets are painted on the viewport
+with the hand tool or Space to pan. Two-finger gestures pan and pinch to zoom,
+and Shift + wheel scrolls horizontally. Only visible sheets are painted on the viewport
 canvas. Opening an existing lesson without A4 metadata fits its contents into
 these pages while retaining all objects.
 

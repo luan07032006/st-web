@@ -40,7 +40,11 @@ public final class Main {
             "cylinder", "ruler", "protractor");
     private static final Path PROJECT_ROOT = findProjectRoot();
     private static final Path FRONTEND = PROJECT_ROOT.resolve("Frontend").normalize();
-    private static final Path LESSON_FILE = PROJECT_ROOT.resolve("Backend/data/lesson.json");
+    private static final Path DATA_DIR = Path.of(System.getenv().getOrDefault(
+            "BOARD_DATA_DIR", PROJECT_ROOT.resolve("Backend/data").toString())).toAbsolutePath().normalize();
+    private static final Path LESSON_FILE = DATA_DIR.resolve("lesson.json");
+    private static final Path DOCUMENTS_DIR = DATA_DIR.resolve("documents");
+    private static final Object DOCUMENT_LOCK = new Object();
 
     private Main() {
     }
@@ -90,6 +94,7 @@ public final class Main {
                     System.getenv().getOrDefault("HOST", "127.0.0.1")), port), 0);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.createContext("/api/lesson", Main::handleLesson);
+        server.createContext("/api/documents", Main::handleDocuments);
         server.createContext("/api/ai/recognize", exchange -> handleAI(exchange, false));
         server.createContext("/api/ai/solve", exchange -> handleAI(exchange, true));
         server.createContext("/api/ai/status", Main::handleAIStatus);
@@ -155,6 +160,92 @@ public final class Main {
             if (exchange.getResponseCode() == -1) {
                 sendError(exchange, 500, "Không thể đọc hoặc lưu bài giảng.");
             }
+        }
+    }
+
+    private static void handleDocuments(HttpExchange exchange) throws IOException {
+        try (exchange) {
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
+            if (path.equals("/api/documents")) {
+                if (!"GET".equals(method)) { sendError(exchange, 405, "Chỉ hỗ trợ GET."); return; }
+                ArrayNode documents = JSON.createArrayNode();
+                if (Files.isDirectory(DOCUMENTS_DIR)) {
+                    try (var files = Files.list(DOCUMENTS_DIR)) {
+                        for (Path file : files.filter(item -> item.getFileName().toString()
+                                .matches("[a-f0-9-]{36}\\.json")).sorted().toList()) {
+                            try {
+                                JsonNode data = JSON.readTree(Files.readAllBytes(file));
+                                ObjectNode metadata = JSON.createObjectNode();
+                                for (String key : new String[]{"documentId", "kind", "title", "createdAt",
+                                        "updatedAt", "revision", "favorite", "thumbnail"}) {
+                                    if (data.has(key)) metadata.set(key, data.get(key));
+                                }
+                                documents.add(metadata);
+                            } catch (IOException exception) {
+                                System.err.println("Không đọc được tài liệu: " + file.getFileName());
+                            }
+                        }
+                    }
+                }
+                send(exchange, 200, "application/json; charset=utf-8", JSON.writeValueAsBytes(documents));
+                return;
+            }
+            String id = path.startsWith("/api/documents/") ? path.substring("/api/documents/".length()) : "";
+            if (!id.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")) {
+                sendError(exchange, 400, "Mã tài liệu không hợp lệ."); return;
+            }
+            Path file = DOCUMENTS_DIR.resolve(id + ".json");
+            if ("GET".equals(method)) {
+                if (!Files.isRegularFile(file)) { sendError(exchange, 404, "Không tìm thấy tài liệu."); return; }
+                send(exchange, 200, "application/json; charset=utf-8", Files.readAllBytes(file));
+                return;
+            }
+            if (!"PUT".equals(method)) {
+                exchange.getResponseHeaders().set("Allow", "GET, PUT");
+                sendError(exchange, 405, "Phương thức không được hỗ trợ."); return;
+            }
+            byte[] body = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+            if (body.length > MAX_BODY_BYTES) { sendError(exchange, 413, "Tài liệu vượt quá 32 MB."); return; }
+            JsonNode data;
+            try {
+                data = JSON.readTree(body);
+                validateDocument(data);
+                if (!id.equals(data.path("documentId").asText())
+                        || !Set.of("notebook", "whiteboard").contains(data.path("kind").asText())
+                        || !data.path("kind").asText().equals(data.path("workspaceMode").asText())
+                        || !data.path("title").isTextual() || data.path("title").asText().length() > 200
+                        || !data.path("revision").canConvertToLong() || data.path("revision").asLong() < 1
+                        || !isFiniteNumber(data.path("createdAt")) || !isFiniteNumber(data.path("updatedAt"))
+                        || (data.has("thumbnail") && (!data.path("thumbnail").isTextual()
+                            || data.path("thumbnail").asText().length() > 250_000
+                            || (!data.path("thumbnail").asText().isEmpty()
+                                && !data.path("thumbnail").asText().matches("^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$"))))) {
+                    throw new IllegalArgumentException("Thông tin tài liệu không hợp lệ.");
+                }
+            } catch (IllegalArgumentException | IOException exception) {
+                sendError(exchange, 400, "Dữ liệu tài liệu không hợp lệ."); return;
+            }
+            synchronized (DOCUMENT_LOCK) {
+                if (Files.isRegularFile(file)) {
+                    JsonNode previous = JSON.readTree(Files.readAllBytes(file));
+                    long previousRevision = previous.path("revision").asLong();
+                    long revision = data.path("revision").asLong();
+                    if (previousRevision > revision || (previousRevision == revision && !previous.equals(data))) {
+                        sendError(exchange, 409, "Có bản lưu mới hơn. Bản trên thiết bị vẫn được giữ lại."); return;
+                    }
+                }
+                Files.createDirectories(DOCUMENTS_DIR);
+                Path temporary = Files.createTempFile(DOCUMENTS_DIR, "document-", ".tmp");
+                try {
+                    JSON.writeValue(temporary.toFile(), data);
+                    try { Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+                    catch (AtomicMoveNotSupportedException exception) {
+                        Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } finally { Files.deleteIfExists(temporary); }
+            }
+            send(exchange, 200, "application/json; charset=utf-8", "{\"saved\":true}");
         }
     }
 

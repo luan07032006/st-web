@@ -36,7 +36,8 @@ def run():
                 route.fulfill(status=404, body="Not found")
 
         page.route("**/*", serve)
-        page.goto("http://localhost/index.html")
+        page.goto("http://localhost/editor.html")
+        page.evaluate("documentReady")
         page.wait_for_function("typeof boardW !== 'undefined' && boardW > 0")
         page.evaluate("""() => {
           window.roundOldOptions={smoothing:0.65,streamline:0,thinning:1,simulatePressure:false,
