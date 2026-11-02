@@ -1,0 +1,26 @@
+#pencilDialog { width: 560px; }
+#pencilDialog .dialog-head > button, #pencilPalette .dialog-head > button { flex: none; }
+.pencil-touch-option { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 64px; padding: 12px 0 20px; cursor: pointer; }
+.pencil-touch-option strong, .pencil-touch-option small { display: block; }
+.pencil-touch-option strong { font-size: 16px; }
+.pencil-touch-option small { margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+#pencilOnly { width: 28px; height: 28px; flex: none; accent-color: var(--blue); margin: 0; }
+.pencil-sensitivity { border: 0; padding: 0; margin: 8px 0 24px; }
+.pencil-sensitivity legend { padding: 0; margin-bottom: 12px; font-weight: 600; font-size: 14px; }
+.pencil-sensitivity > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.pencil-sensitivity button, .pencil-quick-tools button { min-height: 48px; padding: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); font-size: 14px; }
+.pencil-sensitivity button[aria-pressed="true"], .pencil-quick-tools button[aria-pressed="true"] { border-color: var(--blue); background: var(--surface-strong); box-shadow: inset 0 0 0 1px var(--blue); }
+.pencil-test-heading { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.pencil-test-heading output { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+#clearPencilTest { min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--ink); }
+#pencilTestPad { display: block; width: 100%; height: 140px; border-radius: 12px; border: 1px solid var(--muted); background: #fff; touch-action: none; }
+.pencil-support-note { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 16px 0 0; }
+.pencil-save-status { min-height: 20px; font-size: 12px; color: var(--muted); margin: 12px 0 0; }
+#pencilPalette { width: 410px; }
+.pencil-quick-tools { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+#pencilQuickColors { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+#pencilQuickColors button { width: 44px; height: 44px; border: 3px solid var(--panel); outline: 1px solid var(--muted); padding: 0; border-radius: 50%; background: var(--pencil-color); }
+#pencilQuickColors button[aria-pressed="true"] { outline: 3px solid var(--blue); }
+#pencilQuickColors button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+#pencilSwapBtn[aria-pressed="true"] { background: var(--surface-strong); color: var(--blue); }
+@media(max-width:600px) { #pencilDialog, #pencilPalette { padding: 16px; } .pencil-touch-option { gap: 12px; } }

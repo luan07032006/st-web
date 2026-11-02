@@ -116,6 +116,7 @@ function toast(message) {
 }
 
 function chooseTool(value, { preserveSelection = false, preserveLassoMode = false } = {}) {
+  window.PencilControls?.toolChanged(tool, value);
   const newLasso = value === "moveLasso" && !preserveSelection;
   if (tool === "moveLasso" && (value !== tool || newLasso)) {
     if (start?.groupMove) finishGroupMove(true);
@@ -351,8 +352,6 @@ function syncWorkspaceUI() {
   document.querySelector("#paperTemplatesPanel .paper-hint").textContent = isWhiteboard()
     ? "Chọn nền và màu cho toàn bộ bảng viết."
     : "Chọn mẫu bên dưới. Kiểu và màu giấy áp dụng cho tất cả trang A4.";
-  $("welcomeTitle").innerHTML = isWhiteboard()
-    ? "Không giới hạn,<br>cứ viết ý tưởng của bạn." : "Một trang mới,<br>một ý tưởng mới.";
   $("galleryAddPage").hidden = isWhiteboard();
 }
 
@@ -526,7 +525,6 @@ function requestInkDraw() {
         layer.height = canvas.height;
       }
       inkLiveStroke = InkEngine.createLiveStroke(active);
-      $("welcome").hidden = true;
     }
     const dpr = window.devicePixelRatio || 1;
     if (start.inkPreview && performance.now() >= start.inkPreviewExpires) clearInkPreview();
@@ -1134,6 +1132,8 @@ function paintObject(context, object) {
     context.stroke();
   } else if (object.type === "cylinder") {
     paintCylinder(context, bounds(object));
+  } else if (object.type === "table") {
+    window.BoardTables?.paint(context, object);
   } else if (object.type === "text") {
     const size = object.size || 24;
     const family = object.formula ? "Georgia" : "Segoe UI, Arial";
@@ -1405,12 +1405,20 @@ function extendPaperForScroll() {
     Math.ceil((bottom + 120 - paper.top + paper.gap) / (paper.h + paper.gap)));
 }
 
+function pageScrollTop() {
+  if (isWhiteboard()) return 0;
+  const pages = pdfDocumentPages();
+  const firstTop = pages.length ? Math.min(...pages.map(page => page.y)) : paper.top;
+  // The leading margin stays at most 60 screen pixels, even after zooming in.
+  return Math.min(0, paper.top - firstTop * view.z);
+}
+
 function scrollRange() {
   if (isWhiteboard()) return 0;
   const pages = pdfDocumentPages();
   const bottom = pages.length ? Math.max(...pages.map(page => page.y + page.h))
     : paperPage(paperPageCount - 1).y + paper.h;
-  return Math.max(0, bottom * view.z + 100 - boardH);
+  return Math.max(0, bottom * view.z + 100 - boardH + pageScrollTop());
 }
 
 function paintPaper(context, page, guides = false, background = paperBackground,
@@ -1487,13 +1495,14 @@ function draw({ preserveInkPreview = false } = {}) {
     view.x = Math.max(boardW - pageWidth * view.z - 24, Math.min(24, view.x));
   }
   if (!isWhiteboard()) {
-    // Keep part of the sheet reachable without moving the pinch anchor during a gesture.
+    // Horizontal panning keeps part of the sheet reachable.
     if (view.manualPan && !paperGesture) {
       view.x = Math.max(64 - pageWidth * view.z, Math.min(boardW - 64, view.x));
     }
-    const firstPageTop = documentMode ? Math.min(...pdfPages.map(page => page.y)) : paper.top;
-    if (!paperGesture) view.y = Math.max(-scrollRange(),
-      Math.min(view.manualPan ? boardH - 64 - firstPageTop * view.z : 0, view.y));
+    // Enforce the page boundary during gestures as well as after release.
+    // A restored view, wheel scroll or hand drag follows the same limits.
+    const top = pageScrollTop();
+    view.y = Math.max(top - scrollRange(), Math.min(top, view.y));
   }
   const pages = visiblePages();
   const dpr = window.devicePixelRatio || 1;
@@ -1616,7 +1625,6 @@ function draw({ preserveInkPreview = false } = {}) {
     ctx.restore();
   }
 
-  $("welcome").hidden = objects.length > 0 || Boolean(active) || view.y < -100;
   const pageIndex = documentMode
     ? Math.max(0, pdfPages.findIndex(page => (page.y + page.h) * view.z + view.y > boardH / 2))
     : Math.max(0, Math.min(paperPageCount - 1,
@@ -1629,6 +1637,7 @@ function draw({ preserveInkPreview = false } = {}) {
   $("objectCount").textContent = `${objects.length} đối tượng`;
   $("undoBtn").disabled = !undoStack.length;
   $("redoBtn").disabled = !redoStack.length;
+  window.BoardTables?.syncSelection();
   updateBoardScrollbar();
   if (tool === "moveLasso" || tool === "eraser") {
     const button = document.querySelector(`[data-tool="${tool}"]`).getBoundingClientRect();
@@ -2305,6 +2314,7 @@ function rollbackTouchEdit() {
 
 canvas.onpointerdown = (event) => {
   if (window.DocumentStore && !window.documentWorkspace?.ready) return;
+  if (window.PencilControls?.ignorePointer(event)) return;
   if (event.pointerType === "pen" && (paperGesture || (dragging && start?.pointerType === "touch"))) {
     if (start?.groupMove) finishGroupMove(true);
     rollbackTouchEdit();
@@ -2314,6 +2324,10 @@ canvas.onpointerdown = (event) => {
     paperGesture = null;
     touchPointers.clear();
     draw();
+  }
+  if (event.pointerType === "pen" && !dragging) {
+    // Ignore old finger/palm contacts before starting a pencil stroke.
+    touchPointers.clear();
   }
   // A palm or another pointer must never replace the pen's active stroke.
   if (dragging && start?.pointerType === "pen") return;
@@ -2341,7 +2355,9 @@ canvas.onpointerdown = (event) => {
   const screen = screenPoint(event);
   const rawPoint = world(screen);
   const page = pageAt(rawPoint);
-  const pan = space || tool === "hand" || event.button === 1;
+  const fingerPan = event.pointerType === "touch" && window.PencilControls?.pencilOnly
+    && ["pen", "highlight", "eraser", "lasso", "aiRegion"].includes(tool);
+  const pan = space || tool === "hand" || event.button === 1 || fingerPan;
   if (!pan && !page && tool !== "moveLasso") return;
   const point = pan || tool === "select" || tool === "moveLasso" ? rawPoint : clampToPage(rawPoint, page);
 
@@ -2360,11 +2376,10 @@ canvas.onpointerdown = (event) => {
   if (event.pointerType === "touch" && ["eraser", "select"].includes(tool) && !pan) {
     start.touchRollback = { document: boardSnapshot(), undo: undoStack.slice(), redo: redoStack.slice() };
   }
-
   dragging = true;
   canvas.setPointerCapture(event.pointerId);
 
-  if (space || tool === "hand" || event.button === 1) {
+  if (space || tool === "hand" || event.button === 1 || fingerPan) {
     start.pan = true;
     return;
   }
@@ -2475,7 +2490,8 @@ canvas.onpointerdown = (event) => {
     inkLiveStroke = null;
     start.inkScale = view.z;
     start.inkInput = InkEngine.createInput({ scale: view.z, type: tool,
-      pointerType: event.pointerType, positionMode: "adaptive" });
+      pointerType: event.pointerType, positionMode: "adaptive",
+      ...window.PencilControls?.inputOptions(event) });
     start.lastPressure = event.pressure > 0 ? event.pressure : 0.5;
     selected = -1;
     selection = null;
@@ -2486,7 +2502,8 @@ canvas.onpointerdown = (event) => {
       // vector-based and scales naturally if the page is fitted on another screen.
       width: (tool === "highlight" ? penSize * 3 / 1.6 : penSize) / view.z,
       inkVersion: InkEngine.profile.version,
-      inkOptions: InkEngine.strokeOptions({ scale: view.z }, event.pointerType, tool),
+      inkOptions: { ...InkEngine.strokeOptions({ scale: view.z }, event.pointerType, tool),
+        pressureResponse: event.pointerType === "pen" },
       points: [],
       rawPoints: [],
     };
@@ -2509,6 +2526,8 @@ canvas.onpointerdown = (event) => {
 };
 
 canvas.onpointermove = (event) => {
+  // A palm must not pan, erase, or open an interaction while the pencil is down.
+  if (dragging && start?.pointerType === "pen" && event.pointerId !== start.pointerId) return;
   if (dragging && start && event.pointerId !== start.pointerId && !paperGesture) return;
   const screen = screenPoint(event);
   if (touchPointers.has(event.pointerId)) touchPointers.set(event.pointerId, screen);
@@ -2804,7 +2823,7 @@ function editedInkSamples(object, points) {
     return lengths;
   };
   const source = distances(object.points), edited = distances(points);
-  let index = 0;
+  let index = 0, pressureIndex = 0;
   // Manual shape fitting changes the visible path, while its capture history
   // stays intact. Match acquisition metadata by progress along each path.
   return points.map((point, i) => {
@@ -2814,7 +2833,17 @@ function editedInkSamples(object, points) {
     if (!i) index = 0;
     if (i === points.length - 1) index = object.points.length - 1;
     const sample = object.points[index];
-    return { ...point, ...sample, x: point.x, y: point.y, p: point.p };
+    let p = point.p;
+    if (object.inkOptions?.pressureResponse === true) {
+      // Shape smoothing changes coordinates, not the captured pressure envelope.
+      while (pressureIndex + 1 < source.length && source[pressureIndex + 1] < target) pressureIndex++;
+      const next = Math.min(pressureIndex + 1, source.length - 1);
+      const amount = Math.max(0, Math.min(1, (target - source[pressureIndex])
+        / (source[next] - source[pressureIndex] || 1)));
+      const a = object.points[pressureIndex].p ?? 1, b = object.points[next].p ?? 1;
+      p = a + (b - a) * amount;
+    }
+    return { ...point, ...sample, x: point.x, y: point.y, p };
   });
 }
 
@@ -3082,6 +3111,8 @@ function finish() {
 }
 
 function finishPointer(event) {
+  if (window.PencilControls?.endPointer(event)) return;
+  if (event.pointerType === "pen") window.PencilControls?.endPen(event);
   touchPointers.delete(event.pointerId);
   if (paperGesture) {
     if (!touchPointers.size) {
@@ -3160,7 +3191,7 @@ function updateBoardScrollbar() {
   if (!rail || !thumb) return;
 
   const trackHeight = rail.firstElementChild.clientHeight;
-  const worldOffset = -view.y;
+  const worldOffset = pageScrollTop() - view.y;
   const range = scrollRange();
   thumb.style.height = `${Math.min(trackHeight, Math.max(32, trackHeight * boardH / (boardH + range)))}px`;
   const travel = Math.max(0, trackHeight - thumb.offsetHeight);
@@ -3190,7 +3221,7 @@ $("boardScroll").onpointerdown = (event) => {
       Math.min(travel, event.clientY - trackRect.top - thumb.offsetHeight / 2),
     );
     const ratio = thumbTop / travel;
-    view.y = -ratio * scrollRange();
+    view.y = pageScrollTop() - ratio * scrollRange();
     extendPaperForScroll();
     draw();
   }
@@ -3611,6 +3642,7 @@ canvas.ondblclick = event => {
   const index = hit(world(screenPoint(event)));
   const object = objects[index];
   if (object?.type === "text") openText({ x: object.x, y: object.y }, object.formula, object);
+  if (object?.type === "table") window.BoardTables?.open(object);
 };
 
 const mathSymbols = [
@@ -5054,6 +5086,7 @@ function validateDoc(data, allowAlternate = true) {
     "pen",
     "highlight",
     "text",
+    "table",
     "image",
     "document",
     "graph",
@@ -5180,6 +5213,17 @@ function validateDoc(data, allowAlternate = true) {
       )
     ) {
       throw new Error("Văn bản không hợp lệ.");
+    }
+
+    if (object.type === "table") {
+      if (!Number.isInteger(object.rows) || object.rows < 1 || object.rows > 20
+          || !Number.isInteger(object.columns) || object.columns < 1 || object.columns > 12
+          || !Number.isFinite(object.w) || object.w <= 0 || !Number.isFinite(object.h) || object.h <= 0
+          || typeof object.header !== "boolean" || !Array.isArray(object.cells)
+          || object.cells.length !== object.rows || object.cells.some(row => !Array.isArray(row)
+            || row.length !== object.columns || row.some(cell => typeof cell !== "string" || cell.length > 2000))) {
+        throw new Error("Dữ liệu bảng không hợp lệ.");
+      }
     }
 
     if (object.type === "graph") {
@@ -5418,48 +5462,6 @@ document.addEventListener("fullscreenchange", () => {
   updateFocusButton();
   resize();
 });
-
-// =====================================================
-// 19. BÀI GIẢNG MẪU
-// =====================================================
-
-$("exampleBtn").onclick = () => {
-  snapshot();
-
-  objects.push(
-    {
-      type: "text",
-      text: "HÀM SỐ BẬC HAI",
-      x: 140,
-      y: 80,
-      size: 26,
-      color: "#24304a",
-    },
-    {
-      type: "text",
-      text:
-        "y = x² − 3x + 2\n\n" +
-        "Nghiệm: x = 1 và x = 2\n" +
-        "Đỉnh I (1,5; −0,25)",
-      x: 140,
-      y: 135,
-      size: 20,
-      color: "#526b99",
-    },
-    {
-      type: "graph",
-      expression: "x^2 - 3*x + 2",
-      x: 140,
-      y: 290,
-      w: 420,
-      h: 300,
-      color: "#245bea",
-    },
-  );
-
-  changed();
-  chooseTool("select");
-};
 
 // =====================================================
 // 20. PHÍM TẮT

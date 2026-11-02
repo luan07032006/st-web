@@ -175,6 +175,36 @@ def run():
         }""")
         print("PASS pinch zoom anchors both modes, two-finger panning creates no ink, trackpad zoom and 10–400% limits")
 
+        assert page.evaluate("""async () => {
+          const saved=boardSnapshot(),ink=JSON.stringify(objects);
+          view={...view,z:1.25,y:9000,fit:false,manualPan:true};draw();
+          const atTop=()=>paper.top*view.z+view.y<=60.001 && view.y<=pageScrollTop()+.001;
+          if(!atTop() || $('boardScroll').getAttribute('aria-valuenow')!=='0')return false;
+          canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:-5000,cancelable:true}));await frame();
+          if(!atTop())return false;
+          chooseTool('hand');
+          pointer('pointerdown',30,450,200,'mouse');pointer('pointermove',30,450,650,'mouse');await frame();
+          if(!atTop())return false;
+          pointer('pointerup',30,450,650,'mouse');
+          pointer('pointerdown',31,400,200);pointer('pointerdown',32,600,200);
+          pointer('pointermove',31,400,650);pointer('pointermove',32,600,650);await frame();
+          if(!atTop())return false;
+          pointer('pointerup',31,400,650);pointer('pointerup',32,600,650);await frame();
+          paperPageCount=3;
+          view.y=-paperPage(1).y*view.z+60;draw();
+          const nextPage=visiblePages().some(p=>Math.abs(p.y-paperPage(1).y)<.001);
+          view.y=-1e6;draw();
+          const atBottom=Math.abs(view.y-(pageScrollTop()-scrollRange()))<.001;
+          view.z=4;view.y=1e6;draw();
+          const zoomed=atTop()&&$('boardScroll').getAttribute('aria-valuenow')==='0';
+          view.z=.1;view.y=-1e6;draw();
+          const small=scrollRange()===0 && view.y===pageScrollTop();
+          restoreBoardSnapshot(saved);chooseTool('pen');draw();
+          return nextPage&&atBottom&&zoomed&&small&&JSON.stringify(objects)===ink;
+        }""")
+        page.screenshot(path=str(shots / "notebook-page-boundary.png"))
+        print("PASS notebook top locked for saved views, wheel, hand and active two-finger gestures; zoom, next-page scroll and scrollbar remain correct")
+
         page.evaluate("setWorkspaceMode('whiteboard')")
         page.evaluate("saveLesson()")
         page.evaluate("DocumentStore.sync(documentWorkspace.activeId)")

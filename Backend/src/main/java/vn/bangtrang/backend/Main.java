@@ -33,7 +33,7 @@ public final class Main {
     private static final int MAX_AI_IMAGE_BYTES = 8 * 1024 * 1024;
     private static final HttpClient HTTP = createHttpClient();
     private static final Set<String> OBJECT_TYPES = Set.of(
-            "pen", "highlight", "text", "image", "document", "graph",
+            "pen", "highlight", "text", "image", "document", "graph", "table",
             "line", "circle", "rectangle", "square", "rightTriangle",
             "isoscelesTriangle", "equilateralTriangle", "trapezoid", "triangle",
             "cone", "tetrahedron", "quadrilateralPyramid", "cube", "cuboid",
@@ -538,6 +538,28 @@ public final class Main {
             }
 
             String type = object.path("type").asText();
+            if ("table".equals(type)) {
+                JsonNode rows = object.path("rows"), columns = object.path("columns"), cells = object.path("cells");
+                if (!rows.isIntegralNumber() || !columns.isIntegralNumber()
+                        || !rows.canConvertToInt() || !columns.canConvertToInt()
+                        || rows.intValue() < 1 || rows.intValue() > 20
+                        || columns.intValue() < 1 || columns.intValue() > 12
+                        || !object.path("w").isNumber() || !Double.isFinite(object.path("w").asDouble()) || object.path("w").asDouble() <= 0
+                        || !object.path("h").isNumber() || !Double.isFinite(object.path("h").asDouble()) || object.path("h").asDouble() <= 0
+                        || !object.path("header").isBoolean() || !cells.isArray() || cells.size() != rows.intValue()) {
+                    throw new IllegalArgumentException("Dữ liệu bảng không hợp lệ.");
+                }
+                for (JsonNode row : cells) {
+                    if (!row.isArray() || row.size() != columns.intValue()) {
+                        throw new IllegalArgumentException("Số cột của bảng không hợp lệ.");
+                    }
+                    for (JsonNode cell : row) {
+                        if (!cell.isTextual() || cell.asText().length() > 2000) {
+                            throw new IllegalArgumentException("Nội dung ô trong bảng không hợp lệ.");
+                        }
+                    }
+                }
+            }
             for (String key : new String[]{"clipRegions", "cutouts"}) {
                 JsonNode regions = object.path(key);
                 if (regions.isMissingNode()) continue;

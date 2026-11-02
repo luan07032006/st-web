@@ -16,6 +16,8 @@
     <link rel="stylesheet" href="./css/tablet.css?v=document-tabs-1">
     <link rel="stylesheet" href="./css/documents.css?v=library-studio-2">
     <link rel="stylesheet" href="./css/editor-documents.css?v=library-1">
+    <link rel="stylesheet" href="./css/table-tool.css?v=table-1">
+    <link rel="stylesheet" href="./css/pencil.css?v=pencil-1">
 </head>
 
 <body class="sidebar-collapsed document-editor" data-workspace-mode="notebook">
@@ -36,6 +38,7 @@
             <div id="toolButtons" role="group" aria-label="Công cụ chính"></div>
             <div class="tool-separator" aria-hidden="true"></div>
             <div class="insert-tools" role="group" aria-label="Chèn nội dung">
+                <button type="button" id="tableBtn" title="Tạo bảng theo số hàng và cột" aria-label="Chèn bảng" aria-haspopup="dialog"><span data-icon="table"></span><span class="tool-caption">Bảng</span></button>
                 <button type="button" id="imageBtn" title="Chèn ảnh hoặc tài liệu" aria-label="Chèn ảnh hoặc tài liệu"><span data-icon="image"></span><span class="tool-caption">Ảnh / file</span></button>
                 <button type="button" id="shapesBtn" title="Hình học và thước" aria-label="Hình học và thước" aria-haspopup="dialog"><span data-icon="shapes"></span><span class="tool-caption">Hình học</span></button>
                 <button type="button" id="formulaQuickBtn" title="Chèn công thức toán học" aria-label="Chèn công thức toán học"><span data-icon="formula"></span><span class="tool-caption">Công thức</span></button>
@@ -76,11 +79,6 @@
                 <button type="button" id="paperSettingsBtn" aria-haspopup="dialog" title="Chọn kiểu giấy, màu giấy và xem các trang">▦ Giấy &amp; trang</button>
                 <button type="button" id="addPageBtn" title="Thêm trang A4 ở cuối tài liệu">＋ Thêm trang</button>
             </div>
-            <div class="welcome" id="welcome"><span class="welcome-icon" data-icon="pen"></span>
-                <h1 id="welcomeTitle">Một trang mới,<br>một ý tưởng mới.</h1>
-                <p id="welcomeDescription">Viết bằng bút hoặc ngón tay. Chụm hai ngón để thu phóng, kéo hai ngón để di chuyển.</p>
-                <div class="welcome-hints"><span data-icon="gesture"></span> Chụm để thu phóng <span>·</span> Nét viết tự làm mượt</div><button id="exampleBtn">Mở bài giảng mẫu <span>↗</span></button>
-            </div>
             <div class="eraser-options" id="eraserOptions" role="group" aria-label="Chế độ tẩy" hidden>
                 <button type="button" data-eraser-mode="stroke" aria-pressed="true">Tẩy nét</button>
                 <button type="button" data-eraser-mode="object" aria-pressed="false">Tẩy đối tượng</button>
@@ -92,7 +90,7 @@
             <div class="board-bottom">
                 <div class="history"><button id="undoBtn" aria-label="Hoàn tác"
                         title="Hoàn tác (Ctrl Z)">↶</button><button id="redoBtn" aria-label="Làm lại"
-                        title="Làm lại (Ctrl Shift Z)">↷</button></div>
+                        title="Làm lại (Ctrl Shift Z)">↷</button><button type="button" id="pencilSwapBtn" title="Đổi nhanh công cụ / Tẩy" aria-label="Đổi nhanh công cụ và tẩy"><span data-icon="swap"></span></button><button type="button" id="pencilSettingsBtn" title="Thiết lập Apple Pencil" aria-label="Thiết lập Apple Pencil" aria-haspopup="dialog"><span data-icon="pencil-settings"></span></button></div>
                 <div class="zoom">
                     <button type="button" id="zoomOut" aria-label="Thu nhỏ giấy" title="Thu nhỏ 10%">−</button>
                     <output id="zoomPercent" aria-live="polite">100%</output>
@@ -108,9 +106,9 @@
                     </button>
                 </div>
             </div>
-            <div class="gesture-tip"><span data-icon="gesture"></span> Chụm hai ngón để thu phóng</div>
             <div class="selection-note" id="selectionNote" role="status" hidden>Đã chọn vùng trên bảng.
             </div>
+            <button type="button" id="editTableBtn" class="table-selection-action" hidden aria-haspopup="dialog"><span data-icon="table"></span>Sửa bảng</button>
         </section>
         <aside id="sidebar">
             <div class="drawer-heading"><div><strong>Góc trợ giúp</strong><span>Toán học &amp; trợ lý AI</span></div><button type="button" id="closeSidebar" aria-label="Đóng công cụ / AI"><span data-icon="close"></span></button></div>
@@ -268,10 +266,37 @@ x + y <= 4</textarea></div>
     <script src="./js/document-ui.js?v=library-studio-2"></script>
     <script src="./js/vendor/perfect-freehand/index.js?v=1.2.3"></script>
     <script src="./js/rope-ink.js?v=adaptive-ink-8"></script>
-    <script src="./js/ink-engine.js?v=form-preserving-ink-3"></script>
+    <script src="./js/ink-engine.js?v=pencil-pressure-1"></script>
     <script src="./js/rounded-ink.js?v=form-preserving-ink-3"></script>
-    <script src="./js/app.js?v=documents-1"></script>
-    <script src="./js/tablet-ui.js?v=ipad-workspace-1"></script>
+    <dialog id="tableDialog" aria-labelledby="tableTitle" aria-describedby="tableHelp">
+        <form id="tableForm">
+            <div class="dialog-head"><div><h2 id="tableTitle">Tạo bảng</h2><p id="tableHelp">Chọn số hàng và cột. Có thể nhập nội dung hoặc để trống để viết bằng bút.</p></div><button type="button" id="closeTable" aria-label="Đóng tạo bảng">×</button></div>
+            <div class="table-dimensions">
+                <label for="tableRows">Số hàng<input id="tableRows" type="number" inputmode="numeric" min="1" max="20" step="1" value="4" required></label>
+                <span class="table-dimension-times" aria-hidden="true">×</span>
+                <label for="tableColumns">Số cột<input id="tableColumns" type="number" inputmode="numeric" min="1" max="12" step="1" value="3" required></label>
+                <label class="table-header-option"><input id="tableHeader" type="checkbox" checked>Hàng đầu là tiêu đề</label>
+            </div>
+            <div class="table-preview-heading"><strong>Nội dung bảng</strong><span id="tableSummary" role="status" aria-live="polite"></span></div>
+            <div class="table-grid-scroll" tabindex="0" role="region" aria-label="Xem trước và nhập nội dung bảng"><table id="tablePreview" aria-label="Nội dung từng ô"></table></div>
+            <p class="table-editor-hint">Chạm vào ô để nhập · Tab để chuyển ô · Tối đa 20 hàng × 12 cột.</p>
+            <div class="dialog-actions"><button type="button" id="cancelTable">Hủy</button><button type="submit" class="primary" id="insertTable">Chèn bảng</button></div>
+        </form>
+    </dialog>
+    <dialog id="pencilDialog" aria-labelledby="pencilTitle">
+        <div class="dialog-head"><div><h2 id="pencilTitle">Apple Pencil</h2><p>Lực nhấn &amp; thao tác nhanh</p></div><button type="button" id="closePencil" aria-label="Đóng thiết lập bút">×</button></div>
+        <label class="pencil-touch-option"><span><strong>Chỉ viết bằng bút</strong><small></small></span><input id="pencilOnly" type="checkbox" role="switch"></label>
+        <fieldset class="pencil-sensitivity"><legend>Cảm giác lực nhấn</legend><div role="group" aria-label="Độ nhạy lực nhấn"><button type="button" data-pressure-curve="soft" aria-pressed="false">Nhẹ tay</button><button type="button" data-pressure-curve="balanced" aria-pressed="true">Cân bằng</button><button type="button" data-pressure-curve="firm" aria-pressed="false">Tì mạnh</button></div></fieldset>
+        <div class="pencil-test-heading"><label for="pencilTestPad">Thử lực nhấn</label><output id="pencilForce">0%</output><button type="button" id="clearPencilTest">Xóa thử</button></div>
+        <canvas id="pencilTestPad" aria-label="Viết thử bằng Apple Pencil để kiểm tra độ thanh đậm theo lực nhấn"></canvas>
+        <p class="pencil-support-note" id="pencilShortcutStatus">Chạm hai lần trên thân Pencil 2 cần ứng dụng iPad. Trên web, dùng nút đổi nhanh công cụ / Tẩy.</p>
+        <p class="pencil-save-status" id="pencilSettingsStatus" role="status"></p>
+    </dialog>
+    <dialog id="pencilPalette" aria-labelledby="pencilPaletteTitle"><div class="dialog-head"><h2 id="pencilPaletteTitle">Công cụ nhanh</h2><button type="button" id="closePencilPalette" aria-label="Đóng công cụ nhanh">×</button></div><div class="pencil-quick-tools"><button type="button" data-pencil-tool="pen">Bút viết</button><button type="button" data-pencil-tool="highlight">Tô sáng</button><button type="button" data-pencil-tool="eraser">Tẩy</button><button type="button" data-pencil-action="undo">Hoàn tác</button><button type="button" data-pencil-action="redo">Làm lại</button></div><div id="pencilQuickColors" role="group" aria-label="Màu mực nhanh"></div></dialog>
+    <script src="./js/app.js?v=pencil-1"></script>
+    <script src="./js/tablet-ui.js?v=pencil-1"></script>
+    <script src="./js/table-tool.js?v=table-1"></script>
+    <script src="./js/pencil.js?v=pencil-1"></script>
     <script src="./js/pdf-import.js?v=paper-gallery"></script>
     <script src="./js/ai-chat.js?v=ipad-workspace-1"></script>
     <script src="./js/editor-documents.js?v=library-1"></script>

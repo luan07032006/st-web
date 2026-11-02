@@ -48,6 +48,8 @@ window.InkEngine = (() => {
   function createInput(options = {}) {
     const scale = clamp(finite(options.scale, 1), 0.1, 4);
     const isPen = options.pointerType === "pen";
+    const pressureResponse = isPen && options.pressureResponse === true;
+    const pressureExponent = clamp(finite(options.pressureExponent, 0.85), 0.5, 1.8);
     const smooth = options.positionMode !== "raw";
     let prev = null;
     let fx = 0, fy = 0;
@@ -92,14 +94,20 @@ window.InkEngine = (() => {
         direction = nextDirection;
 
         const filteredPressure = prev && isPen
-          ? (endpoint ? prev.pressure : mix(prev.pressure, pressure, euroAlpha(18, dt)))
+          ? (endpoint ? prev.pressure : mix(prev.pressure, pressure,
+            euroAlpha(pressureResponse ? (pressure > prev.pressure ? 32 : 24) : 18, dt)))
           : pressure;
         const speed = prev ? rawTravel / (dt * 1000) : 0; // CSS px / ms
         velocity = prev ? mix(velocity, speed, alpha(12, dt)) : speed;
-        const pressureWidth = isPen ? 0.45 + 1.2 * Math.pow(filteredPressure, 0.7) : 1;
-        const speedWidth = 1.12 - 0.4 * velocity / (velocity + 0.6);
+        const pressureWidth = isPen ? pressureResponse
+          ? 0.35 + 1.3 * Math.pow(filteredPressure, pressureExponent)
+          : 0.45 + 1.2 * Math.pow(filteredPressure, 0.7) : 1;
+        // With a pressure-sensitive pencil, force dominates; speed only trims the width slightly.
+        const speedWidth = pressureResponse ? 1.04 - 0.12 * velocity / (velocity + 0.6)
+          : 1.12 - 0.4 * velocity / (velocity + 0.6);
         const target = options.type === "highlight" ? 1 : pressureWidth * speedWidth;
-        const p = endpoint && prev ? prev.p : clamp(target, profile.minPressure, profile.maxPressure);
+        const widthResponse = pressureResponse && prev ? mix(prev.p, target, euroAlpha(40, dt)) : target;
+        const p = endpoint && prev ? prev.p : clamp(widthResponse, profile.minPressure, profile.maxPressure);
 
         const x = fx / scale, y = fy / scale;
         prev = { x, y, rawX: input.x, rawY: input.y, time, elapsed, p,
@@ -573,7 +581,7 @@ window.InkEngine = (() => {
     return lengths;
   }
 
-  function polishedOutline(points, width, lengths, total, closed, highlight) {
+  function polishedOutline(points, width, lengths, total, closed, highlight, pressureResponse) {
     if (!points.length) return new Path2D();
     if (total < 1e-6) return dotGeometry(points.at(-1), width).path;
     const count = closed ? points.length - 1 : points.length;
@@ -586,7 +594,9 @@ window.InkEngine = (() => {
       const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy) || 1;
       const edge = taper ? clamp(Math.min(lengths[i], total - lengths[i]) / taper, 0, 1) : 1;
       const shaping = taper ? .08 + .92 * edge * edge * (3 - 2 * edge) : 1;
-      const r = width * (highlight ? 1 : clamp(finite(point.p, 1), .9, 1.1)) * shaping / 2;
+      const r = width * (highlight ? 1 : pressureResponse
+        ? clamp(finite(point.p, 1), profile.minPressure, profile.maxPressure)
+        : clamp(finite(point.p, 1), .9, 1.1)) * shaping / 2;
       radii.push(r);
       left.push({ x: point.x - dy / length * r, y: point.y + dx / length * r });
       right.push({ x: point.x + dy / length * r, y: point.y - dx / length * r });
@@ -629,14 +639,16 @@ window.InkEngine = (() => {
     const closed = object.inkOptions?.closed === true && points.length > 2
       && Math.hypot(points[0].x - points.at(-1).x, points[0].y - points.at(-1).y) < 1e-5;
     const polished = object.inkOptions?.refinementVersion >= 2;
+    const pressureResponse = object.inkOptions?.pressureResponse === true;
     let entry = outlineCache.get(points);
-    if (entry?.count === points.length && entry.width === width && entry.closed === closed && entry.polished === polished) return entry;
+    if (entry?.count === points.length && entry.width === width && entry.closed === closed
+        && entry.polished === polished && entry.pressureResponse === pressureResponse) return entry;
     const live = liveGeometry.get(points);
     const path = new Path2D(), lengths = lengthsFor(points,
       live?.width === width ? live.lengths : [0]), total = lengths.at(-1);
     if (polished) {
-      entry = { path: polishedOutline(points, width, lengths, total, closed, object.type === "highlight"),
-        width, count: points.length, closed, polished };
+      entry = { path: polishedOutline(points, width, lengths, total, closed, object.type === "highlight", pressureResponse),
+        width, count: points.length, closed, polished, pressureResponse };
       outlineCache.set(points, entry);
       return entry;
     }
@@ -649,7 +661,7 @@ window.InkEngine = (() => {
         ? live.segments[i] : null;
       path.addPath((stable || cubicRibbon(points, i, width, lengths, taper, total)).path);
     }
-    entry = { path, width, count: points.length, closed, polished };
+    entry = { path, width, count: points.length, closed, polished, pressureResponse };
     outlineCache.set(points, entry);
     return entry;
   }
